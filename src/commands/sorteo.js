@@ -35,6 +35,11 @@ module.exports = {
                 .setDescription('Cantidad mínima de mensajes necesarios para participar (0 para desactivar)')
                 .setMinValue(0)
                 .setMaxValue(1000))
+        .addIntegerOption(option =>
+            option.setName('invites_requeridos')
+                .setDescription('Cantidad mínima de invites (usos) necesarios para participar (0 para desactivar)')
+                .setMinValue(0)
+                .setMaxValue(10000))
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
     async execute(interaction) {
@@ -45,6 +50,7 @@ module.exports = {
         const minMessages = interaction.options.getInteger('mensajes_minimos') || 0;
         const requiredRole = interaction.options.getRole('rol_requerido') || null;
         const hostOption = interaction.options.getUser('host') || null;
+    const requiredInvites = interaction.options.getInteger('invites_requeridos') || 0;
 
         try {
             const giveaway = await interaction.client.giveawayManager.createGiveaway({
@@ -54,12 +60,13 @@ module.exports = {
                 prize,
                 host: hostOption || interaction.user,
                 minMessages,
-                requiredRole: requiredRole ? requiredRole.id : null
+                requiredRole: requiredRole ? requiredRole.id : null,
+                requiredInvites: requiredInvites
             });
 
             if (giveaway) {
                 await interaction.reply({
-                    content: `✅ ¡Sorteo creado exitosamente en ${channel}!${minMessages > 0 ? `\nLos participantes necesitarán ${minMessages} mensajes para participar.` : ''}${requiredRole ? `\nRol requerido: ${requiredRole}` : ''}${hostOption ? `\nHost establecido: ${hostOption.tag}` : ''}`,
+                    content: `✅ ¡Sorteo creado exitosamente en ${channel}!${minMessages > 0 ? `\nLos participantes necesitarán ${minMessages} mensajes para participar.` : ''}${requiredRole ? `\nRol requerido: ${requiredRole}` : ''}${requiredInvites > 0 ? `\nInvites requeridos: ${requiredInvites}` : ''}${hostOption ? `\nHost establecido: ${hostOption.tag}` : ''}`,
                     ephemeral: true
                 });
             } else {

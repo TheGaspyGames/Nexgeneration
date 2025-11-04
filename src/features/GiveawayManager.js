@@ -31,6 +31,9 @@ class GiveawayManager {
             .setColor('#FF5733')
             .setFooter({ text: `Termina el ${new Date(endTime).toLocaleString()}` })
             .addFields({ name: 'Requisitos', value: `${minMessages > 0 ? `Mensajes mínimos: ${minMessages}\n` : ''}${requiredRole ? `Rol requerido: <@&${requiredRole}>` : 'Ninguno'}` });
+        if (options.requiredInvites && options.requiredInvites > 0) {
+            embed.addFields({ name: 'Invites requeridos', value: `${options.requiredInvites} invite(s)`, inline: false });
+        }
 
         const buttons = new ActionRowBuilder()
             .addComponents(
@@ -58,8 +61,9 @@ class GiveawayManager {
             winners: Number(winners),
             host: host.id,
             endTime,
-               minMessages,
-              requiredRole,
+                                minMessages,
+                            requiredRole,
+                        requiredInvites: options.requiredInvites || 0,
             participants: new Set(),
             ended: false
         };
@@ -97,6 +101,9 @@ class GiveawayManager {
             .setColor('#FF5733')
             .setFooter({ text: 'Sorteo finalizado' })
             .addFields({ name: 'Requisitos', value: `${giveaway.minMessages && giveaway.minMessages > 0 ? `Mensajes mínimos: ${giveaway.minMessages}\n` : ''}${giveaway.requiredRole ? `Rol requerido: <@&${giveaway.requiredRole}>` : 'Ninguno'}` });
+            if (giveaway.requiredInvites && giveaway.requiredInvites > 0) {
+                embed.addFields({ name: 'Invites requeridos', value: `${giveaway.requiredInvites} invite(s)`, inline: false });
+            }
 
         await message.edit({
             embeds: [embed],
@@ -156,6 +163,27 @@ class GiveawayManager {
                 } catch (e) {
                     console.error('Error verificando rol requerido:', e.message);
                     return interaction.reply({ content: '❌ Error al verificar tus roles. Intenta de nuevo.', ephemeral: true });
+                }
+            }
+
+            // Verificar invites requeridos si aplica
+            if (giveaway.requiredInvites && giveaway.requiredInvites > 0) {
+                try {
+                    const invites = await interaction.guild.invites.fetch();
+                    const userInvites = invites.filter(i => i.inviter && i.inviter.id === interaction.user.id);
+                    let uses = 0;
+                    for (const inv of userInvites.values()) {
+                        uses += inv.uses || 0;
+                    }
+                    if (uses < giveaway.requiredInvites) {
+                        return interaction.reply({
+                            content: `❌ Necesitas al menos ${giveaway.requiredInvites} invite(s) (usos) para participar. Actualmente tienes ${uses}.`,
+                            ephemeral: true
+                        });
+                    }
+                } catch (e) {
+                    console.error('Error verificando invites:', e.message);
+                    return interaction.reply({ content: '❌ No se pudo verificar tus invites. Asegúrate de que el bot tenga permiso para ver las invites.', ephemeral: true });
                 }
             }
 

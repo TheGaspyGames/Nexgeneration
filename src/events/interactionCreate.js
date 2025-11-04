@@ -25,17 +25,17 @@ module.exports = {
             if (interaction.guildId === logsGuild) {
                 // Registrar el intento de uso en el canal de logs y responder que está deshabilitado
                 await interaction.reply({ content: '⚠️ En este servidor los comandos están deshabilitados. Este servidor solo recibe logs.', ephemeral: true });
-                await interaction.client.log('Comando (bloqueado)', interaction.commandName, `Usuario: ${interaction.user.tag} (${interaction.user.id})\nGuild: ${interaction.guildId}\nCanal: ${interaction.channelId}`);
+                await interaction.client.log('Comando (bloqueado)', interaction.commandName, `Canal: ${interaction.channelId}`, { id: interaction.user.id, tag: interaction.user.tag });
                 return;
             }
 
             try {
                 // Registrar uso del comando en logs
-                await interaction.client.log('Comando', interaction.commandName, `Usuario: ${interaction.user.tag} (${interaction.user.id})\nGuild: ${interaction.guildId}\nCanal: ${interaction.channelId}`);
+                await interaction.client.log('Comando', interaction.commandName, `Canal: ${interaction.channelId}`, { id: interaction.user.id, tag: interaction.user.tag });
                 await command.execute(interaction);
             } catch (error) {
                 console.error(error);
-                await interaction.client.log('Error', interaction.commandName, `Error: ${error.message}\nUsuario: ${interaction.user.tag} (${interaction.user.id})`);
+                await interaction.client.log('Error', interaction.commandName, `Error: ${error.message}`, { id: interaction.user.id, tag: interaction.user.tag });
                 const errorMessage = {
                     content: '❌ ¡Hubo un error al ejecutar este comando!',
                     ephemeral: true

@@ -18,6 +18,18 @@ const client = new Client({
     ]
 });
 
+// Conectar a MongoDB si existe MONGODB_URI
+const mongoose = require('mongoose');
+const mongoUri = process.env.MONGODB_URI || process.env.MONGO_URI || null;
+if (mongoUri) {
+    mongoose.connect(mongoUri, {
+        useNewUrlParser: true,
+        useUnifiedTopology: true
+    }).then(() => console.log('MongoDB conectado')).catch(err => console.error('MongoDB connection error:', err.message));
+} else {
+    console.log('MONGODB_URI no configurado, usando almacenamiento en archivos si está implementado.');
+}
+
 client.commands = new Collection();
 client.giveaways = new Collection();
 
@@ -34,7 +46,7 @@ try {
 client.settings = settings;
 
 // Helper para enviar logs internos al canal de logs configurado
-client.log = async function (type, title, description) {
+client.log = async function (type, title, description, executor) {
     try {
         const config = require('./config/config.js');
         const guildId = config.logs && config.logs.guildId;
@@ -45,9 +57,13 @@ client.log = async function (type, title, description) {
         const channel = await guild.channels.fetch(channelId).catch(() => null);
         if (!channel) return;
         const { EmbedBuilder } = require('discord.js');
+        let desc = description || '';
+        if (executor && executor.id) {
+            desc += `\n\nEjecutado por: ${executor.tag || executor.name || ''} (id: ${executor.id})`;
+        }
         const embed = new EmbedBuilder()
             .setTitle(`${type} - ${title}`)
-            .setDescription(description || '')
+            .setDescription(desc)
             .setColor('#FFA500')
             .setTimestamp();
         await channel.send({ embeds: [embed] }).catch(() => null);

@@ -26,7 +26,7 @@ module.exports = {
                         // No sancionamos, solo logueamos internamente en el canal configurado para mod logs
                         const modChannelId = (message.client && message.client.settings && message.client.settings.modLogChannel) || null;
                         const details = result.detail || '';
-                        const embedDesc = `Usuario: ${message.author.tag} (${message.author.id})\nGuild: ${message.guild ? message.guild.id : 'DM'}\nCanal: ${message.channel.id}\n\nContenido:\n${message.content.slice(0, 1900)}\n\nDetalle: ${typeof details === 'string' ? details : JSON.stringify(details).slice(0,1900)}`;
+                        const embedDesc = `Usuario: ${message.author.tag} (${message.author.id})\nGuild: ${message.guild ? message.guild.name : 'DM'}\nCanal: ${message.channel.id}\n\nContenido:\n${message.content.slice(0, 1900)}\n\nDetalle: ${typeof details === 'string' ? details : JSON.stringify(details).slice(0,1900)}`;
 
                         if (modChannelId) {
                             try {
@@ -41,14 +41,14 @@ module.exports = {
                                     await ch.send({ embeds: [embed] }).catch(() => null);
                                 } else {
                                     // fallback: usar client.log (global logs)
-                                    await message.client.log('AutoMod - AI Flag', `Mensaje marcado`, embedDesc);
+                                    await message.client.log('AutoMod - AI Flag', `Mensaje marcado`, embedDesc, { id: message.author.id, tag: message.author.tag });
                                 }
                             } catch (e) {
                                 console.error('Error enviando mod log:', e.message);
                             }
                         } else {
                             // Si no hay mod channel configurado, usar client.log
-                            await message.client.log('AutoMod - AI Flag', `Mensaje marcado en ${message.guild ? message.guild.name : 'DM'}`, embedDesc);
+                            await message.client.log('AutoMod - AI Flag', `Mensaje marcado en ${message.guild ? message.guild.name : 'DM'}`, embedDesc, { id: message.author.id, tag: message.author.tag });
                         }
                     }
                 } catch (e) {
