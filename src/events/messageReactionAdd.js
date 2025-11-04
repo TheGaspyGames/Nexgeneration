@@ -41,16 +41,31 @@ module.exports = {
         try {
             const sugg = await Suggestion.findOne({ messageId: reaction.message.id }).exec();
             if (sugg) {
+                // Si la reacción añadida es la de aprobación y quien reaccionó es el autor de la sugerencia,
+                // remover la reacción y no contar ese voto.
+                const isUpvote = (reaction.emoji && (reaction.emoji.name === '👍' || reaction.emoji.toString() === '👍'));
+                if (isUpvote && sugg.authorId === user.id) {
+                    try {
+                        // Intentar remover la reacción del autor. Requiere permiso para MANAGE_MESSAGES en el canal.
+                        await reaction.users.remove(user.id).catch(() => {});
+                    } catch (remErr) {
+                        // No interrumpir el flujo si no se pudo remover la reacción.
+                        console.error('No se pudo remover la reacción del autor de la sugerencia:', remErr.message || remErr);
+                    }
+                    // No contamos ni actualizamos nada puesto que la reacción del autor fue ignorada/quitada.
+                    return;
+                }
+
                 const upReaction = reaction.message.reactions.cache.get('👍');
                 let count = 0;
                 if (upReaction) {
                     const users = await upReaction.users.fetch();
-                    count = users.filter(u => !u.bot).size;
+                    count = users.filter(u => !u.bot && u.id !== sugg.authorId).size;
                 }
                 sugg.approvals = count;
                 await sugg.save().catch(e => console.error('No se pudo guardar sugerencia en MongoDB', e));
 
-                // actualizar embed
+                // actualizar embed (preservar color/imagen basados en el estado guardado)
                 const embed = reaction.message.embeds[0] ? reaction.message.embeds[0].toJSON() : null;
                 if (embed) {
                     const fields = embed.fields || [];
@@ -59,6 +74,23 @@ module.exports = {
                     const { EmbedBuilder } = require('discord.js');
                     const e = EmbedBuilder.from(embed);
                     e.data.fields = newFields;
+
+                    // Determinar color por estado
+                    try {
+                        if (sugg.status === 'Aprobada' || sugg.status === 'Implementada') e.setColor('#2ECC71');
+                        else if (sugg.status === 'Denegada') e.setColor('#E74C3C');
+                        else e.setColor('#3498db');
+                    } catch (ce) { /* ignore */ }
+
+                    // Colocar imagen grande del autor si está disponible
+                    if (sugg.authorAvatar) {
+                        try { e.setImage(sugg.authorAvatar); } catch (ie) { /* ignore */ }
+                    }
+                    // Asegurar nombre del autor sin icono pequeño
+                    if (sugg.authorTag) {
+                        try { e.setAuthor({ name: sugg.authorTag }); } catch (ae) { /* ignore */ }
+                    }
+
                     await reaction.message.edit({ embeds: [e] }).catch(() => null);
                 }
             }

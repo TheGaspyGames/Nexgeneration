@@ -34,6 +34,16 @@ module.exports = {
             otherFields.push({ name: 'Razón', value: razon, inline: false });
             embed.data.fields = otherFields;
 
+            // Color rojo para denegada
+            try { embed.setColor('#E74C3C'); } catch (e) { /* ignore */ }
+            // Asegurar imagen grande del autor si está disponible
+            if (sugg.authorAvatar) {
+                try { embed.setImage(sugg.authorAvatar); } catch (e) { /* ignore */ }
+            }
+            if (sugg.authorTag) {
+                try { embed.setAuthor({ name: sugg.authorTag }); } catch (e) { /* ignore */ }
+            }
+
             // Guardar cambios en MongoDB
             try { await sugg.save(); } catch (e) { console.error('No se pudo guardar sugerencia en MongoDB', e); }
 

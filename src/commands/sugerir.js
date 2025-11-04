@@ -47,13 +47,16 @@ module.exports = {
         const embed = new EmbedBuilder()
             .setTitle('📝 Nueva Sugerencia')
             .setDescription(suggestion)
-            .setAuthor({ name: interaction.user.tag, iconURL: interaction.user.displayAvatarURL({ dynamic: true }) })
+            .setAuthor({ name: interaction.user.tag })
             .addFields(
                 { name: 'Estado', value: '⏳ Pendiente', inline: true },
                 { name: 'ID', value: `${id}`, inline: true },
                 { name: 'Aprobaciones', value: '0', inline: true }
             )
-            .setColor(config.embedColor)
+            // Color azul por defecto para sugerencias pendientes
+            .setColor('#3498db')
+            // Mostrar la imagen del autor en grande dentro del embed
+            .setImage(interaction.user.displayAvatarURL({ dynamic: true, size: 1024 }))
             .setTimestamp()
             .setFooter({ text: `Sugerencia #${id}` });
 
@@ -67,6 +70,8 @@ module.exports = {
                 const doc = new Suggestion({
                     id: id,
                     authorId: interaction.user.id,
+                    authorTag: interaction.user.tag,
+                    authorAvatar: interaction.user.displayAvatarURL({ dynamic: true, size: 1024 }),
                     messageId: message.id,
                     channelId: channel.id,
                     content: suggestion,
