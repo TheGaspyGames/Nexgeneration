@@ -51,35 +51,81 @@ client.log = async function (type, title, description, executor) {
         const config = require('./config/config.js');
         const guildId = config.logs && config.logs.guildId;
         const channelId = config.logs && config.logs.channelId;
-        if (!guildId || !channelId) return;
-        const guild = await client.guilds.fetch(guildId).catch(() => null);
-        if (!guild) return;
-        const channel = await guild.channels.fetch(channelId).catch(() => null);
-        if (!channel) return;
+
+        // Debug: Verificar configuración
+        console.log('[DEBUG] Configuración de logs:', {
+            guildId: guildId || 'No configurado',
+            channelId: channelId || 'No configurado'
+        });
+
+        if (!guildId || !channelId) {
+            console.warn('[LOGS] No se encontró configuración de logs en config.js');
+            return;
+        }
+
+        const guild = await client.guilds.fetch(guildId).catch(e => {
+            console.error('[LOGS] Error al obtener guild:', e.message);
+            return null;
+        });
+        
+        if (!guild) {
+            console.error(`[LOGS] No se pudo encontrar el servidor ${guildId}`);
+            return;
+        }
+
+        const channel = await guild.channels.fetch(channelId).catch(e => {
+            console.error('[LOGS] Error al obtener canal:', e.message);
+            return null;
+        });
+        
+        if (!channel) {
+            console.error(`[LOGS] No se pudo encontrar el canal ${channelId} en el servidor ${guild.name}`);
+            return;
+        }
+
+        // Debug: Verificar permisos
+        const permissions = channel.permissionsFor(guild.members.me);
+        if (!permissions.has('SendMessages') || !permissions.has('ViewChannel') || !permissions.has('EmbedLinks')) {
+            console.error('[LOGS] El bot no tiene los permisos necesarios en el canal de logs:', {
+                SendMessages: permissions.has('SendMessages'),
+                ViewChannel: permissions.has('ViewChannel'),
+                EmbedLinks: permissions.has('EmbedLinks')
+            });
+            return;
+        }
         const { EmbedBuilder } = require('discord.js');
 
         const embed = new EmbedBuilder()
             .setTitle(`📝 ${type}`)
-            .addFields(
-                { name: 'Comando:', value: title, inline: true },
-                { name: 'Canal:', value: description.includes('Canal:') ? description.split('Canal: ')[1].split('\n')[0] : 'N/A', inline: true }
-            )
+            .addFields([
+                { name: '🤖 Comando:', value: title, inline: true },
+                { name: '📁 Canal:', value: description.includes('Canal:') ? description.split('Canal: ')[1].split('\n')[0] : 'N/A', inline: true }
+            ])
             .setColor('#3498db')
             .setTimestamp();
+
+        console.log(`[DEBUG] Enviando log a ${channelId}:`, {
+            type, title, description,
+            executor: executor ? `${executor.tag} (${executor.id})` : 'No executor'
+        });
 
         // Si hay descripción adicional (como argumentos del comando)
         const args = description.split('\n').find(line => line.startsWith('Descripción:'));
         if (args) {
-            embed.addFields({ name: 'Descripción:', value: args.replace('Descripción: ', ''), inline: false });
+            embed.addFields([{ 
+                name: '📝 Detalles:', 
+                value: args.replace('Descripción: ', ''), 
+                inline: false 
+            }]);
         }
 
         // Información del ejecutor
         if (executor && executor.id) {
-            embed.addFields({ 
-                name: 'Ejecutado por:', 
+            embed.addFields([{ 
+                name: '👤 Ejecutado por:', 
                 value: `${executor.tag || executor.name || 'Desconocido'}\nID: ${executor.id}`, 
                 inline: false 
-            });
+            }]);
         }
 
         await channel.send({ embeds: [embed] }).catch(() => null);
