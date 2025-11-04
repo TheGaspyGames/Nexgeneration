@@ -79,12 +79,30 @@ async function deployCommands() {
         console.log(`Iniciando el registro de ${commands.length} comandos.`);
 
         const rest = new REST().setToken(BOT_TOKEN);
-        const data = await rest.put(
-            Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID),
-            { body: commands },
-        );
+        // Determinar applicationId y guildId (priorizar env, luego settings, luego client)
+        const appId = process.env.CLIENT_ID || process.env.CLIENTID || (client.user && client.user.id);
+        const guildId = process.env.GUILD_ID || client.settings && client.settings.guildId;
 
-        console.log(`¡${data.length} comandos registrados exitosamente!`);
+        if (!appId) {
+            console.warn('No se pudo determinar el application ID para registrar comandos. Se omitirá el registro.');
+            return;
+        }
+
+        let data;
+        if (guildId) {
+            data = await rest.put(
+                Routes.applicationGuildCommands(appId, guildId),
+                { body: commands },
+            );
+            console.log(`¡${data.length} comandos registrados exitosamente en el servidor ${guildId}!`);
+        } else {
+            // Registrar globalmente si no hay guild configurado
+            data = await rest.put(
+                Routes.applicationCommands(appId),
+                { body: commands },
+            );
+            console.log(`¡${data.length} comandos registrados globalmente! (puede tardar hasta 1 hora en propagarse)`);
+        }
     } catch (error) {
         console.error('Error al registrar los comandos:', error);
     }

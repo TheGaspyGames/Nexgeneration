@@ -11,27 +11,34 @@ module.exports = {
         const GiveawayManager = require('../features/GiveawayManager');
         client.giveawayManager = new GiveawayManager(client);
 
-        // Función para actualizar el contador de usuarios
-        function updateUserCount() {
+        // Función para actualizar el contador de usuarios con fetch (más precisa)
+        async function updateUserCount() {
             const guild = client.guilds.cache.get(settings.guildId);
-            if (guild) {
-                // Contar usuarios reales (no bots)
-                const userCount = guild.members.cache.filter(member => !member.user.bot).size;
-                client.user.setPresence({
-                    activities: [{
-                        name: `${userCount} usuarios`,
-                        type: ActivityType.Watching
-                    }],
-                    status: 'online'
-                });
+            if (!guild) return;
+
+            // Intentar obtener miembros actualizados; si falla usar cache
+            let members = null;
+            try {
+                members = await guild.members.fetch();
+            } catch (e) {
+                members = guild.members.cache;
             }
+
+            const userCount = members.filter(member => !member.user.bot).size;
+            client.user.setPresence({
+                activities: [{
+                    name: `${userCount} usuarios`,
+                    type: ActivityType.Watching
+                }],
+                status: 'online'
+            });
         }
 
-        // Actualizar el contador inicialmente
-        updateUserCount();
+        // Actualizar el contador inicialmente (no bloqueante)
+        updateUserCount().catch(() => {});
 
-        // Actualizar el contador cada 5 minutos
-        setInterval(updateUserCount, 5 * 60 * 1000);
+        // Actualizar el contador cada 1 minuto
+        setInterval(() => updateUserCount().catch(() => {}), 60 * 1000);
 
         // Restaurar temporizadores de sorteos activos
         if (client.giveaways && client.giveaways.size > 0) {
