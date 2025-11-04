@@ -33,24 +33,36 @@ module.exports = {
 
             if (accion === 'aprobar') {
                 sugg.status = 'Aprobada';
-                embed.data.fields = embed.data.fields.map(f => f.name === 'Estado' ? { name: 'Estado', value: '✅ Aprobada', inline: true } : f);
-                // Color verde para aprobada
                 try { embed.setColor('#2ECC71'); } catch (e) { /* ignore */ }
             } else if (accion === 'implementada') {
                 sugg.status = 'Implementada';
-                embed.data.fields = embed.data.fields.map(f => f.name === 'Estado' ? { name: 'Estado', value: '🚀 Implementada', inline: true } : f);
-                // También marcar como verde (implementada)
                 try { embed.setColor('#2ECC71'); } catch (e) { /* ignore */ }
             }
 
-            // Asegurar que la imagen del autor esté presente y mostrarla grande
+            // Asegurar que la imagen del autor esté como thumbnail
             if (sugg.authorAvatar) {
-                try { embed.setImage(sugg.authorAvatar); } catch (e) { /* ignore */ }
+                try { embed.setThumbnail(sugg.authorAvatar); } catch (e) { /* ignore */ }
             }
-            // Mostrar nombre del autor en el author (sin icono pequeño)
-            if (sugg.authorTag) {
-                try { embed.setAuthor({ name: sugg.authorTag }); } catch (e) { /* ignore */ }
-            }
+
+            // Actualizar estado en el campo correspondiente
+            embed.data.fields = embed.data.fields.map(f => {
+                if (f.name === 'Estado') {
+                    return { 
+                        name: 'Estado', 
+                        value: accion === 'aprobar' ? '✅ Aprobada' : '🚀 Implementada',
+                        inline: true 
+                    };
+                } else if (f.name === 'Votos') {
+                    const upvotes = message.reactions.cache.get('👍')?.count || 0;
+                    const downvotes = message.reactions.cache.get('👎')?.count || 0;
+                    return {
+                        name: 'Votos',
+                        value: `👍 ${upvotes - 1} | 👎 ${downvotes - 1}`,
+                        inline: true
+                    };
+                }
+                return f;
+            });
 
             // Guardar cambios en Mongo
             try { await sugg.save(); } catch (e) { console.error('No se pudo guardar sugerencia en MongoDB', e); }

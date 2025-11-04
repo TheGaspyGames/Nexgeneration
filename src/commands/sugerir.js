@@ -45,20 +45,20 @@ module.exports = {
             id = Date.now();
         }
         const embed = new EmbedBuilder()
-            .setTitle('📝 Nueva Sugerencia')
-            .setDescription(suggestion)
-            .setAuthor({ name: interaction.user.tag })
+            .setTitle('⭐ ¡Nueva sugerencia! ⭐')
             .addFields(
+                { name: 'ID sug:', value: `${id}`, inline: true },
+                { name: 'Fecha:', value: `<t:${Math.floor(Date.now()/1000)}:R>`, inline: true },
+                { name: 'Autor:', value: interaction.user.tag, inline: true },
+                { name: '\u200B', value: '\u200B' }, // Espaciador
+                { name: 'Sug:', value: suggestion },
+                { name: '\u200B', value: '\u200B' }, // Espaciador
                 { name: 'Estado', value: '⏳ Pendiente', inline: true },
-                { name: 'ID', value: `${id}`, inline: true },
-                { name: 'Aprobaciones', value: '0', inline: true }
+                { name: 'Votos', value: '👍 0 | 👎 1', inline: true }
             )
-            // Color azul por defecto para sugerencias pendientes
             .setColor('#3498db')
-            // Mostrar la imagen del autor en grande dentro del embed
-            .setImage(interaction.user.displayAvatarURL({ dynamic: true, size: 1024 }))
-            .setTimestamp()
-            .setFooter({ text: `Sugerencia #${id}` });
+            .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true, size: 1024 }))
+            .setTimestamp();
 
         const message = await channel.send({ embeds: [embed] });
         await message.react('👍');

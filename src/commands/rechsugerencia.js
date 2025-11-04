@@ -27,22 +27,34 @@ module.exports = {
 
             sugg.status = 'Denegada';
             sugg.reason = razon;
-            // Actualizar estado y añadir campo razón (o reemplazar si existe)
-            embed.data.fields = embed.data.fields.map(f => f.name === 'Estado' ? { name: 'Estado', value: '❌ Denegada', inline: true } : f);
-            // Añadir/actualizar Razón
-            const otherFields = embed.data.fields.filter(f => f.name !== 'Razón');
-            otherFields.push({ name: 'Razón', value: razon, inline: false });
-            embed.data.fields = otherFields;
 
             // Color rojo para denegada
             try { embed.setColor('#E74C3C'); } catch (e) { /* ignore */ }
-            // Asegurar imagen grande del autor si está disponible
+
+            // Asegurar que la imagen del autor esté como thumbnail
             if (sugg.authorAvatar) {
-                try { embed.setImage(sugg.authorAvatar); } catch (e) { /* ignore */ }
+                try { embed.setThumbnail(sugg.authorAvatar); } catch (e) { /* ignore */ }
             }
-            if (sugg.authorTag) {
-                try { embed.setAuthor({ name: sugg.authorTag }); } catch (e) { /* ignore */ }
-            }
+
+            // Actualizar campos
+            const updatedFields = embed.data.fields.map(f => {
+                if (f.name === 'Estado') {
+                    return { name: 'Estado', value: '❌ Denegada', inline: true };
+                } else if (f.name === 'Votos') {
+                    const upvotes = message.reactions.cache.get('👍')?.count || 0;
+                    const downvotes = message.reactions.cache.get('👎')?.count || 0;
+                    return {
+                        name: 'Votos',
+                        value: `👍 ${upvotes - 1} | 👎 ${downvotes - 1}`,
+                        inline: true
+                    };
+                }
+                return f;
+            }).filter(f => f.name !== 'Razón');
+
+            // Añadir razón al final
+            updatedFields.push({ name: 'Razón', value: razon, inline: false });
+            embed.data.fields = updatedFields;
 
             // Guardar cambios en MongoDB
             try { await sugg.save(); } catch (e) { console.error('No se pudo guardar sugerencia en MongoDB', e); }

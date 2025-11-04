@@ -49,15 +49,27 @@ module.exports = {
                             sugg.approvals = count;
                             await sugg.save().catch(e => console.error('No se pudo guardar sugerencia en MongoDB', e));
 
-                            // actualizar embed (preservar color/imagen basados en el estado guardado)
+                            // actualizar embed preservando formato
                             const embed = reaction.message.embeds[0] ? reaction.message.embeds[0].toJSON() : null;
                             if (embed) {
-                                const fields = embed.fields || [];
-                                const newFields = fields.map(f => f.name === 'Aprobaciones' ? { name: 'Aprobaciones', value: `${count}`, inline: f.inline } : f);
-                                if (!newFields.some(f => f.name === 'Aprobaciones')) newFields.push({ name: 'Aprobaciones', value: `${count}`, inline: true });
                                 const { EmbedBuilder } = require('discord.js');
                                 const e = EmbedBuilder.from(embed);
-                                e.data.fields = newFields;
+
+                                // Actualizar votos
+                                const upvotes = reaction.message.reactions.cache.get('👍')?.count || 0;
+                                const downvotes = reaction.message.reactions.cache.get('👎')?.count || 0;
+
+                                // Actualizar campos preservando el formato
+                                e.data.fields = embed.fields.map(f => {
+                                    if (f.name === 'Votos') {
+                                        return {
+                                            name: 'Votos',
+                                            value: `👍 ${upvotes - 1} | 👎 ${downvotes - 1}`,
+                                            inline: true
+                                        };
+                                    }
+                                    return f;
+                                });
 
                                 // Determinar color por estado
                                 try {
@@ -66,13 +78,9 @@ module.exports = {
                                     else e.setColor('#3498db');
                                 } catch (ce) { /* ignore */ }
 
-                                // Colocar imagen grande del autor si está disponible
+                                // Asegurar thumbnail del autor
                                 if (sugg.authorAvatar) {
-                                    try { e.setImage(sugg.authorAvatar); } catch (ie) { /* ignore */ }
-                                }
-                                // Asegurar nombre del autor sin icono pequeño
-                                if (sugg.authorTag) {
-                                    try { e.setAuthor({ name: sugg.authorTag }); } catch (ae) { /* ignore */ }
+                                    try { e.setThumbnail(sugg.authorAvatar); } catch (ie) { /* ignore */ }
                                 }
 
                                 await reaction.message.edit({ embeds: [e] }).catch(() => null);
