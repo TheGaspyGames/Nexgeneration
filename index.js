@@ -57,15 +57,31 @@ client.log = async function (type, title, description, executor) {
         const channel = await guild.channels.fetch(channelId).catch(() => null);
         if (!channel) return;
         const { EmbedBuilder } = require('discord.js');
-        let desc = description || '';
-        if (executor && executor.id) {
-            desc += `\n\nEjecutado por: ${executor.tag || executor.name || ''} (id: ${executor.id})`;
-        }
+
         const embed = new EmbedBuilder()
-            .setTitle(`${type} - ${title}`)
-            .setDescription(desc)
-            .setColor('#FFA500')
+            .setTitle(`📝 ${type}`)
+            .addFields(
+                { name: 'Comando:', value: title, inline: true },
+                { name: 'Canal:', value: description.includes('Canal:') ? description.split('Canal: ')[1].split('\n')[0] : 'N/A', inline: true }
+            )
+            .setColor('#3498db')
             .setTimestamp();
+
+        // Si hay descripción adicional (como argumentos del comando)
+        const args = description.split('\n').find(line => line.startsWith('Descripción:'));
+        if (args) {
+            embed.addFields({ name: 'Descripción:', value: args.replace('Descripción: ', ''), inline: false });
+        }
+
+        // Información del ejecutor
+        if (executor && executor.id) {
+            embed.addFields({ 
+                name: 'Ejecutado por:', 
+                value: `${executor.tag || executor.name || 'Desconocido'}\nID: ${executor.id}`, 
+                inline: false 
+            });
+        }
+
         await channel.send({ embeds: [embed] }).catch(() => null);
     } catch (err) {
         console.error('Error enviando log:', err.message);

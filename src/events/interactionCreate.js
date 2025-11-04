@@ -25,13 +25,20 @@ module.exports = {
             if (interaction.guildId === logsGuild) {
                 // Registrar el intento de uso en el canal de logs y responder que está deshabilitado
                 await interaction.reply({ content: '⚠️ En este servidor los comandos están deshabilitados. Este servidor solo recibe logs.', ephemeral: true });
-                await interaction.client.log('Comando (bloqueado)', interaction.commandName, `Canal: ${interaction.channelId}`, { id: interaction.user.id, tag: interaction.user.tag });
+                await interaction.client.log('Comando', interaction.commandName, logDescription, { id: interaction.user.id, tag: interaction.user.tag });
+                await command.execute(interaction);
                 return;
             }
 
             try {
-                // Registrar uso del comando en logs
-                await interaction.client.log('Comando', interaction.commandName, `Canal: ${interaction.channelId}`, { id: interaction.user.id, tag: interaction.user.tag });
+                // Registrar uso del comando en logs con argumentos
+                const args = [];
+                if (interaction.options) {
+                    for (const option of interaction.options.data) {
+                        if (option.value) args.push(`${option.name}: "${option.value}"`);
+                    }
+                }
+                const logDescription = `Canal: ${interaction.channelId}\n${args.length > 0 ? `Descripción: ${args.join(', ')}` : ''}`;
                 await command.execute(interaction);
             } catch (error) {
                 console.error(error);
