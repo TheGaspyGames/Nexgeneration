@@ -8,6 +8,16 @@ module.exports = {
             const command = interaction.client.commands.get(interaction.commandName);
             if (!command) return;
 
+            // Verificar si estamos en el servidor permitido
+            const settings = require('../../config/settings.json');
+            if (settings.guildId && interaction.guildId !== settings.guildId) {
+                await interaction.reply({ 
+                    content: '⚠️ Este bot solo está configurado para funcionar en un servidor específico.', 
+                    ephemeral: true 
+                });
+                return;
+            }
+
             // Si estamos en el server de logs, no ejecutar comandos (solo mostrar logs)
             const config = require('../../config/config.js');
             const logsGuild = config.logs && config.logs.guildId;

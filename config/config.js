@@ -10,7 +10,6 @@ module.exports = {
     },
     autoModeration: {
         enabled: true,
-        aiFlagging: false, // si true, se ejecuta un análisis (placeholder) y solo marca, no sanciona
         maxMentions: 5, // Número máximo de menciones permitidas
         maxLines: 10, // Número máximo de líneas permitidas
         bannedWords: [] // Palabras prohibidas

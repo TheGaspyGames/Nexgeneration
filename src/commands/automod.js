@@ -27,10 +27,7 @@ module.exports = {
                     option.setName('palabra')
                         .setDescription('La palabra que será prohibida')
                         .setRequired(true)))
-        .addSubcommand(subcommand =>
-            subcommand
-                .setName('aiflag')
-                .setDescription('Activa o desactiva el marcado por IA (solo marca, no sanciona)'))
+
         .addSubcommand(subcommand =>
             subcommand
                 .setName('removeword')
@@ -78,38 +75,7 @@ module.exports = {
                 }
                 break;
             }
-            case 'aiflag': {
-                const fs = require('fs');
-                const path = require('path');
 
-                config.autoModeration.aiFlagging = !config.autoModeration.aiFlagging;
-
-                // Si se activa y no hay canal de mod logs configurado, usar el canal donde se ejecuta el comando
-                const settingsPath = path.join(__dirname, '..', '..', 'config', 'settings.json');
-                let settings = {};
-                try { settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8')); } catch (e) { settings = {}; }
-
-                if (config.autoModeration.aiFlagging) {
-                    if (!settings.modLogChannel) {
-                        settings.modLogChannel = interaction.channel.id;
-                        try {
-                            fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf8');
-                            // Update runtime client.settings if available
-                            if (interaction.client && interaction.client.settings) interaction.client.settings.modLogChannel = settings.modLogChannel;
-                        } catch (e) {
-                            console.error('No se pudo guardar settings.json:', e.message);
-                        }
-                        await interaction.reply({ content: `✅ AI flagging activado. Canal de mod logs establecido a este canal (${interaction.channel}).`, ephemeral: true });
-                        break;
-                    }
-                }
-
-                await interaction.reply({
-                    content: `✅ AI flagging ha sido ${config.autoModeration.aiFlagging ? 'activado' : 'desactivado'}.`,
-                    ephemeral: true
-                });
-                break;
-            }
             case 'removeword': {
                 const word = interaction.options.getString('palabra').toLowerCase();
                 const index = config.autoModeration.bannedWords.indexOf(word);

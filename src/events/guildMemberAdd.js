@@ -1,9 +1,22 @@
-const { Events } = require('discord.js');
+const { Events, ActivityType } = require('discord.js');
 const config = require('../../config/config.js');
+const settings = require('../../config/settings.json');
 
 module.exports = {
     name: Events.GuildMemberAdd,
     async execute(member) {
+        // Solo actualizar si es el servidor configurado
+        if (member.guild.id === settings.guildId && !member.user.bot) {
+            // Actualizar el contador
+            const userCount = member.guild.members.cache.filter(m => !m.user.bot).size;
+            member.client.user.setPresence({
+                activities: [{
+                    name: `${userCount} usuarios`,
+                    type: ActivityType.Watching
+                }],
+                status: 'online'
+            });
+        }
         if (config.autoroles.enabled && config.autoroles.roles.length > 0) {
             try {
                 const roles = config.autoroles.roles
