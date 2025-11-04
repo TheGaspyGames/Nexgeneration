@@ -21,8 +21,8 @@ const client = new Client({
 client.commands = new Collection();
 client.giveaways = new Collection();
 
-// Cargar settings persistentes
-const settingsPath = path.join(__dirname, '..', 'config', 'settings.json');
+// Cargar settings persistentes (ruta relativa a la raíz)
+const settingsPath = path.join(__dirname, 'config', 'settings.json');
 let settings = { suggestionsChannel: null };
 try {
     if (fs.existsSync(settingsPath)) {
@@ -36,7 +36,7 @@ client.settings = settings;
 // Helper para enviar logs internos al canal de logs configurado
 client.log = async function (type, title, description) {
     try {
-        const config = require('../config/config.js');
+        const config = require('./config/config.js');
         const guildId = config.logs && config.logs.guildId;
         const channelId = config.logs && config.logs.channelId;
         if (!guildId || !channelId) return;
@@ -56,9 +56,9 @@ client.log = async function (type, title, description) {
     }
 };
 
-// Cargar comandos
+// Cargar comandos (ahora en ./src/commands)
 const commands = [];
-const commandsPath = path.join(__dirname, 'commands');
+const commandsPath = path.join(__dirname, 'src', 'commands');
 const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
 
 for (const file of commandFiles) {
@@ -70,12 +70,15 @@ for (const file of commandFiles) {
     }
 }
 
+// Token del bot (acepta TOKEN o DISCORD_TOKEN en .env/entorno)
+const BOT_TOKEN = process.env.TOKEN || process.env.DISCORD_TOKEN || process.env.DISCORD;
+
 // Función para registrar comandos
 async function deployCommands() {
     try {
         console.log(`Iniciando el registro de ${commands.length} comandos.`);
 
-        const rest = new REST().setToken(process.env.TOKEN);
+        const rest = new REST().setToken(BOT_TOKEN);
         const data = await rest.put(
             Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID),
             { body: commands },
@@ -87,8 +90,8 @@ async function deployCommands() {
     }
 }
 
-// Cargar eventos
-const eventsPath = path.join(__dirname, 'events');
+// Cargar eventos (ahora en ./src/events)
+const eventsPath = path.join(__dirname, 'src', 'events');
 const eventFiles = fs.readdirSync(eventsPath).filter(file => file.endsWith('.js'));
 
 for (const file of eventFiles) {
@@ -107,4 +110,10 @@ client.once('ready', () => {
     deployCommands();
 });
 
-client.login(process.env.TOKEN);
+// Iniciar sesión con el token resuelto
+if (!BOT_TOKEN) {
+    console.error('ERROR: No se encontró el token del bot. Define TOKEN o DISCORD_TOKEN en .env o en las variables de entorno.');
+    process.exit(1);
+}
+
+client.login(BOT_TOKEN);

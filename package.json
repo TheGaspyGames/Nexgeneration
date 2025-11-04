@@ -2,10 +2,10 @@
   "name": "nexgeneration-bot",
   "version": "1.0.0",
   "description": "Bot de Discord con múltiples funcionalidades",
-  "main": "src/index.js",
+  "main": "index.js",
   "scripts": {
-    "start": "node src/index.js",
-    "dev": "nodemon src/index.js",
+    "start": "node index.js",
+    "dev": "nodemon index.js",
     "update": "git pull && npm install && pm2 restart nexgeneration-bot"
   },
   "dependencies": {
