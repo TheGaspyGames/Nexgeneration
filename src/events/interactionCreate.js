@@ -21,33 +21,42 @@ module.exports = {
             // Si estamos en el server de logs, no ejecutar comandos (solo mostrar logs)
             const config = require('../../config/config.js');
             const logsGuild = config.logs && config.logs.guildId;
-            const logsChannel = config.logs && config.logs.channelId;
+            const args = [];
+            if (interaction.options && interaction.options.data) {
+                for (const option of interaction.options.data) {
+                    // Soporta subcommands con opciones internas
+                    if (option.type === 1 && option.options) {
+                        for (const subOpt of option.options) {
+                            if (subOpt.value) args.push(`${subOpt.name}: "${subOpt.value}"`);
+                        }
+                    } else if (option.value) {
+                        args.push(`${option.name}: "${option.value}"`);
+                    }
+                }
+            }
+
+            const logDescription = `Canal: ${interaction.channelId}\nInterior: ${args.length > 0 ? `${args.join(', ')}` : ''}`;
+
+            // Si estamos en el server de logs, no ejecutar comandos (solo mostrar logs)
             if (interaction.guildId === logsGuild) {
                 // Registrar el intento de uso en el canal de logs y responder que está deshabilitado
                 await interaction.reply({ content: '⚠️ En este servidor los comandos están deshabilitados. Este servidor solo recibe logs.', ephemeral: true });
-                await interaction.client.log('Comando', interaction.commandName, logDescription, { id: interaction.user.id, tag: interaction.user.tag });
-                await command.execute(interaction);
+                await interaction.client.log('Comando (bloqueado)', `/${interaction.commandName}`, logDescription, { id: interaction.user.id, tag: interaction.user.tag });
                 return;
             }
 
             try {
-                // Registrar uso del comando en logs con argumentos
-                const args = [];
-                if (interaction.options) {
-                    for (const option of interaction.options.data) {
-                        if (option.value) args.push(`${option.name}: "${option.value}"`);
-                    }
-                }
-                const logDescription = `Canal: ${interaction.channelId}\n${args.length > 0 ? `Descripción: ${args.join(', ')}` : ''}`;
+                // Registrar uso del comando en logs
+                await interaction.client.log('Comando', `/${interaction.commandName}`, logDescription, { id: interaction.user.id, tag: interaction.user.tag });
                 await command.execute(interaction);
             } catch (error) {
                 console.error(error);
-                await interaction.client.log('Error', interaction.commandName, `Error: ${error.message}`, { id: interaction.user.id, tag: interaction.user.tag });
+                await interaction.client.log('Error', `/${interaction.commandName}`, `Error: ${error.message}`, { id: interaction.user.id, tag: interaction.user.tag });
                 const errorMessage = {
                     content: '❌ ¡Hubo un error al ejecutar este comando!',
                     ephemeral: true
                 };
-                
+
                 if (interaction.replied || interaction.deferred) {
                     await interaction.followUp(errorMessage);
                 } else {

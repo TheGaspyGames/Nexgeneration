@@ -95,38 +95,37 @@ client.log = async function (type, title, description, executor) {
         }
         const { EmbedBuilder } = require('discord.js');
 
+        // Parsear canal e interior desde la descripción
+        const channelRaw = description && description.includes('Canal:') ? description.split('Canal: ')[1].split('\n')[0] : 'N/A';
+        const interiorLine = description && description.split('\n').find(line => line.startsWith('Interior:'));
+        const interior = interiorLine ? interiorLine.replace('Interior: ', '') : '';
+
+        const channelDisplay = /^\d+$/.test(channelRaw) ? `<#${channelRaw}>` : channelRaw;
+
         const embed = new EmbedBuilder()
             .setTitle(`📝 ${type}`)
-            .addFields([
-                { name: '🤖 Comando:', value: title, inline: true },
-                { name: '📁 Canal:', value: description.includes('Canal:') ? description.split('Canal: ')[1].split('\n')[0] : 'N/A', inline: true }
-            ])
             .setColor('#3498db')
             .setTimestamp();
 
-        console.log(`[DEBUG] Enviando log a ${channelId}:`, {
-            type, title, description,
-            executor: executor ? `${executor.tag} (${executor.id})` : 'No executor'
-        });
-
-        // Si hay descripción adicional (como argumentos del comando)
-        const args = description.split('\n').find(line => line.startsWith('Descripción:'));
-        if (args) {
-            embed.addFields([{ 
-                name: '📝 Detalles:', 
-                value: args.replace('Descripción: ', ''), 
-                inline: false 
-            }]);
-        }
-
-        // Información del ejecutor
+        // Usuario
         if (executor && executor.id) {
-            embed.addFields([{ 
-                name: '👤 Ejecutado por:', 
-                value: `${executor.tag || executor.name || 'Desconocido'}\nID: ${executor.id}`, 
-                inline: false 
-            }]);
+            embed.addFields([{ name: 'Usuario', value: `${executor.tag || executor.name || 'Desconocido'}\nID: ${executor.id}`, inline: false }]);
+        } else {
+            embed.addFields([{ name: 'Usuario', value: 'Desconocido', inline: false }]);
         }
+
+        // Comando y canal
+        embed.addFields([
+            { name: 'Comando', value: title || 'N/A', inline: true },
+            { name: 'Canal', value: channelDisplay, inline: true }
+        ]);
+
+        // Interior (argumentos)
+        if (interior) {
+            embed.addFields([{ name: 'Interior', value: interior, inline: false }]);
+        }
+
+        console.log(`[DEBUG] Enviando log a ${channelId}:`, { type, title, channelRaw, interior, executor: executor ? `${executor.tag} (${executor.id})` : 'No executor' });
 
         await channel.send({ embeds: [embed] }).catch(() => null);
     } catch (err) {
