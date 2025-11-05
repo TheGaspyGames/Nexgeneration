@@ -11,7 +11,7 @@ module.exports = {
     autoModeration: {
         enabled: true,
         maxMentions: 5, // Número máximo de menciones permitidas
-        maxLines: 10, // Número máximo de líneas permitidas
+        maxLines: 10000000000, // Número máximo de líneas permitidas
         bannedWords: [] // Palabras prohibidas
     },
     autoroles: {
