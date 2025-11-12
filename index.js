@@ -26,6 +26,14 @@ if (mongoUri) {
         useNewUrlParser: true,
         useUnifiedTopology: true
     }).then(() => console.log('MongoDB conectado')).catch(err => console.error('MongoDB connection error:', err.message));
+
+    mongoose.connection.on('error', err => {
+        console.error('MongoDB connection error:', err.message || err);
+    });
+
+    mongoose.connection.on('disconnected', () => {
+        console.warn('MongoDB desconectado. Las funciones que dependen de la base de datos usarán modos degradados.');
+    });
 } else {
     console.log('MONGODB_URI no configurado, usando almacenamiento en archivos si está implementado.');
 }

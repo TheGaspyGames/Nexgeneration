@@ -2,7 +2,7 @@ const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const config = require('../../config/config.js');
 const fs = require('fs');
 const path = require('path');
-const { Suggestion, getNextSequence } = require('../models/Suggestion');
+const { Suggestion, getNextSequence, isMongoConnected } = require('../models/Suggestion');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -34,7 +34,7 @@ module.exports = {
         // Obtener next id desde Mongo (o fallback a file si no está disponible)
         let id;
         try {
-            if (getNextSequence) {
+            if (isMongoConnected()) {
                 id = await getNextSequence('suggestionId');
             }
         } catch (err) {
@@ -65,8 +65,9 @@ module.exports = {
         await message.react('👎');
 
         // Guardar sugerencia en MongoDB si está disponible
+        let savedInDb = false;
         try {
-            if (Suggestion) {
+            if (Suggestion && isMongoConnected()) {
                 const doc = new Suggestion({
                     id: id,
                     authorId: interaction.user.id,
@@ -79,13 +80,19 @@ module.exports = {
                     approvals: 0
                 });
                 await doc.save();
+                savedInDb = true;
             }
         } catch (e) {
             console.error('No se pudo guardar sugerencia en MongoDB:', e);
         }
 
+        let replyMessage = `✅ Tu sugerencia ha sido enviada al canal ${channel}`;
+        if (!savedInDb) {
+            replyMessage += '\n⚠️ No se pudo guardar en la base de datos, pero la sugerencia seguirá visible en el canal.';
+        }
+
         await interaction.reply({
-            content: `✅ Tu sugerencia ha sido enviada al canal ${channel}`,
+            content: replyMessage,
             ephemeral: true
         });
     },

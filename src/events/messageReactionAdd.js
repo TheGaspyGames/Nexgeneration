@@ -1,7 +1,7 @@
 const { Events } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
-const { Suggestion } = require('../models/Suggestion');
+const { Suggestion, isMongoConnected } = require('../models/Suggestion');
 
 module.exports = {
     name: Events.MessageReactionAdd,
@@ -38,6 +38,10 @@ module.exports = {
         }
 
         // Manejar reacciones en sugerencias para actualizar contador de aprobaciones
+        if (!isMongoConnected()) {
+            return;
+        }
+
         try {
             const sugg = await Suggestion.findOne({ messageId: reaction.message.id }).exec();
             if (sugg) {
