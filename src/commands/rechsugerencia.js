@@ -1,7 +1,7 @@
 const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
-const { Suggestion } = require('../models/Suggestion');
+const { Suggestion, isMongoConnected } = require('../models/Suggestion');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -15,8 +15,19 @@ module.exports = {
         const id = interaction.options.getInteger('id');
         const razon = interaction.options.getString('razon');
 
-    const sugg = await Suggestion.findOne({ id: id }).exec();
-    if (!sugg) return interaction.reply({ content: `No se encontró la sugerencia con ID ${id}.`, ephemeral: true });
+        if (!isMongoConnected()) {
+            return interaction.reply({ content: '⚠️ La base de datos no está disponible actualmente. Inténtalo más tarde.', ephemeral: true });
+        }
+
+        let sugg;
+        try {
+            sugg = await Suggestion.findOne({ id: id }).exec();
+        } catch (error) {
+            console.error('Error consultando sugerencia en MongoDB:', error);
+            return interaction.reply({ content: '❌ No se pudo consultar la base de datos de sugerencias. Inténtalo nuevamente más tarde.', ephemeral: true });
+        }
+
+        if (!sugg) return interaction.reply({ content: `No se encontró la sugerencia con ID ${id}.`, ephemeral: true });
         try {
             const channel = await interaction.guild.channels.fetch(sugg.channelId).catch(() => null);
             if (!channel) return interaction.reply({ content: 'No se encontró el canal de la sugerencia.', ephemeral: true });

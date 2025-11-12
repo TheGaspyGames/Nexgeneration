@@ -17,13 +17,19 @@ class GiveawayManager {
             host,
                 message,
                 minMessages = 0,
-                requiredRole = null
+                requiredRole = null,
+                requiredInvites = 0
         } = options;
 
         const channel = await this.client.channels.fetch(channelId);
         if (!channel) return null;
 
-        const endTime = Date.now() + ms(duration);
+        const durationMs = ms(duration);
+        if (!durationMs || Number.isNaN(durationMs)) {
+            throw new Error('Duración del sorteo inválida. Usa valores como 30s, 5m, 1h, etc.');
+        }
+
+        const endTime = Date.now() + durationMs;
 
         const embed = new EmbedBuilder()
             .setTitle('🎉 SORTEO')
@@ -31,8 +37,8 @@ class GiveawayManager {
             .setColor('#FF5733')
             .setFooter({ text: `Termina el ${new Date(endTime).toLocaleString()}` })
             .addFields({ name: 'Requisitos', value: `${minMessages > 0 ? `Mensajes mínimos: ${minMessages}\n` : ''}${requiredRole ? `Rol requerido: <@&${requiredRole}>` : 'Ninguno'}` });
-        if (options.requiredInvites && options.requiredInvites > 0) {
-            embed.addFields({ name: 'Invites requeridos', value: `${options.requiredInvites} invite(s)`, inline: false });
+        if (requiredInvites && requiredInvites > 0) {
+            embed.addFields({ name: 'Invites requeridos', value: `${requiredInvites} invite(s)`, inline: false });
         }
 
         const buttons = new ActionRowBuilder()
@@ -63,7 +69,7 @@ class GiveawayManager {
             endTime,
                                 minMessages,
                             requiredRole,
-                        requiredInvites: options.requiredInvites || 0,
+                        requiredInvites,
             participants: new Set(),
             ended: false
         };
