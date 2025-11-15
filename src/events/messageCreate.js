@@ -66,8 +66,17 @@ module.exports = {
                 return;
             }
 
-            // Verificar si la automoderación está activada
-            if (!config.autoModeration.enabled) return;
+        // Verificar si la automoderación está activada
+        if (!config.autoModeration.enabled) return;
+
+        // Ignorar usuarios o roles exentos del automod
+        if (config.autoModeration.ignoredUsers.includes(message.author.id)) {
+            return;
+        }
+
+        if (message.member && message.member.roles.cache.some(role => config.autoModeration.ignoredRoles.includes(role.id))) {
+            return;
+        }
 
             // Si AI flagging está activado, ejecutar un análisis real (OpenAI si hay API key, sino fallback de palabras)
             if (config.autoModeration.aiFlagging) {
