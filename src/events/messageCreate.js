@@ -1,4 +1,4 @@
-const { Events } = require('discord.js');
+const { Events, EmbedBuilder } = require('discord.js');
 const config = require('../../config/config.js');
 
 module.exports = {
@@ -173,16 +173,53 @@ module.exports = {
         }
 
         // Verificar palabras prohibidas
-        const content = message.content.toLowerCase();
-        const containsBannedWord = config.autoModeration.bannedWords.some(word => 
-            content.includes(word.toLowerCase())
+        const loweredContent = message.content.toLowerCase();
+        const matchedBannedWords = config.autoModeration.bannedWords.filter(word =>
+            loweredContent.includes(word.toLowerCase())
         );
 
-        if (containsBannedWord) {
+        if (matchedBannedWords.length) {
             await message.delete();
             await message.channel.send({
                 content: `⚠️ ${message.author}, tu mensaje contiene palabras prohibidas.`
             }).then(msg => setTimeout(() => msg.delete(), 5000));
+
+            const reportChannelId = config.autoModeration.reportChannelId;
+            if (reportChannelId) {
+                try {
+                    const reportChannel = await message.client.channels.fetch(reportChannelId).catch(() => null);
+                    if (reportChannel) {
+                        const highlightedMessage = highlightBannedWords(message.content, matchedBannedWords);
+                        const displayName = (message.member && message.member.displayName) || message.author.tag;
+                        const embed = new EmbedBuilder()
+                            .setTitle('Automod')
+                            .setColor('#FF0000')
+                            .addFields(
+                                {
+                                    name: 'Usuario',
+                                    value: `${message.author.id} - ${displayName}`,
+                                    inline: false
+                                },
+                                {
+                                    name: 'Lo que dijo',
+                                    value: highlightedMessage.slice(0, 1024) || '*Sin contenido*',
+                                    inline: false
+                                }
+                            )
+                            .setTimestamp();
+
+                        if (message.guild) {
+                            embed.setFooter({
+                                text: `Servidor: ${message.guild.name} | Canal: #${message.channel?.name || message.channel.id}`
+                            });
+                        }
+
+                        await reportChannel.send({ embeds: [embed] });
+                    }
+                } catch (error) {
+                    console.error('No se pudo enviar el log de automod:', error);
+                }
+            }
             return;
         }
 
@@ -197,3 +234,14 @@ module.exports = {
         }
     },
 };
+
+function highlightBannedWords(messageContent, bannedWords) {
+    if (!messageContent) return '*Sin contenido*';
+
+    return bannedWords.reduce((acc, word) => {
+        if (!word) return acc;
+        const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const regex = new RegExp(`(${escaped})`, 'gi');
+        return acc.replace(regex, '**$1**');
+    }, messageContent);
+}

@@ -14,7 +14,8 @@ module.exports = {
         maxLines: 10000000000, // Número máximo de líneas permitidas
         bannedWords: [], // Palabras prohibidas
         ignoredRoles: [], // Roles exentos del automod
-        ignoredUsers: [] // Usuarios exentos del automod
+        ignoredUsers: [], // Usuarios exentos del automod
+        reportChannelId: '1439349036644569359' // Canal donde se notifican los bloqueos por palabras prohibidas
     },
     autoroles: {
         enabled: true,
