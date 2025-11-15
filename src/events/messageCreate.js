@@ -15,6 +15,10 @@ module.exports = {
                 message.client.giveawayManager.messageCount.set(message.author.id, currentCount + 1);
             }
 
+            if (!message.client.ipResponseCooldowns) {
+                message.client.ipResponseCooldowns = new Map();
+            }
+
             const normalizedContent = message.content
                 .toLowerCase()
                 .normalize('NFD')
@@ -36,6 +40,17 @@ module.exports = {
             ];
 
             if (normalizedContent && ipTriggers.includes(normalizedContent)) {
+                const now = Date.now();
+                const cooldownKey = message.guild ? `guild:${message.guild.id}` : `user:${message.author.id}`;
+                const cooldownMs = 5 * 60 * 1000; // 5 minutos
+                const lastTrigger = message.client.ipResponseCooldowns.get(cooldownKey);
+
+                if (lastTrigger && (now - lastTrigger) < cooldownMs) {
+                    return;
+                }
+
+                message.client.ipResponseCooldowns.set(cooldownKey, now);
+
                 const response = [
                     `Hola ${message.author} la ip es la siguiente`,
                     'Java: `nexgneration.sdlf.fun`',
