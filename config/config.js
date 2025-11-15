@@ -12,7 +12,9 @@ module.exports = {
         enabled: true,
         maxMentions: 5, // Número máximo de menciones permitidas
         maxLines: 10000000000, // Número máximo de líneas permitidas
-        bannedWords: [] // Palabras prohibidas
+        bannedWords: [], // Palabras prohibidas
+        ignoredRoles: [], // Roles exentos del automod
+        ignoredUsers: [] // Usuarios exentos del automod
     },
     autoroles: {
         enabled: true,
