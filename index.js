@@ -21,18 +21,48 @@ const client = new Client({
 // Conectar a MongoDB si existe MONGODB_URI
 const mongoose = require('mongoose');
 const mongoUri = process.env.MONGODB_URI || process.env.MONGO_URI || null;
+
+let mongoReconnectTimeout = null;
+
+const scheduleMongoReconnect = () => {
+    if (mongoReconnectTimeout || !mongoUri) return;
+    mongoReconnectTimeout = setTimeout(() => {
+        mongoReconnectTimeout = null;
+        connectToMongo();
+    }, 5000);
+};
+
+const connectToMongo = async () => {
+    if (!mongoUri) return;
+
+    if (mongoose.connection.readyState === 1 || mongoose.connection.readyState === 2) {
+        // Ya conectado o conectando
+        return;
+    }
+
+    try {
+        await mongoose.connect(mongoUri, {
+            useNewUrlParser: true,
+            useUnifiedTopology: true
+        });
+        console.log('MongoDB conectado');
+    } catch (err) {
+        console.error('MongoDB connection error:', err.message);
+        scheduleMongoReconnect();
+    }
+};
+
 if (mongoUri) {
-    mongoose.connect(mongoUri, {
-        useNewUrlParser: true,
-        useUnifiedTopology: true
-    }).then(() => console.log('MongoDB conectado')).catch(err => console.error('MongoDB connection error:', err.message));
+    connectToMongo();
 
     mongoose.connection.on('error', err => {
         console.error('MongoDB connection error:', err.message || err);
+        scheduleMongoReconnect();
     });
 
     mongoose.connection.on('disconnected', () => {
-        console.warn('MongoDB desconectado. Las funciones que dependen de la base de datos usarán modos degradados.');
+        console.warn('MongoDB desconectado. Intentando reconectar automáticamente...');
+        scheduleMongoReconnect();
     });
 } else {
     console.log('MONGODB_URI no configurado, usando almacenamiento en archivos si está implementado.');
@@ -140,6 +170,34 @@ client.log = async function (type, title, description, executor) {
         console.error('Error enviando log:', err.message);
     }
 };
+
+client.connectionLostAt = null;
+
+const notifyConnectionRecovery = async (shardId, originEvent) => {
+    if (!client.connectionLostAt) return;
+
+    const downtimeMs = Date.now() - client.connectionLostAt;
+    const downtimeSeconds = Math.max(1, Math.round(downtimeMs / 1000));
+    const description = `Canal: Logs\nInterior: Conexión restablecida (${originEvent}) tras ${downtimeSeconds} segundos. Shard: ${shardId}`;
+
+    try {
+        await client.log('Conexión restaurada', `Shard ${shardId} reconectado`, description, null);
+    } catch (err) {
+        console.error('Error enviando log de reconexión:', err.message);
+    } finally {
+        client.connectionLostAt = null;
+    }
+};
+
+client.on('shardDisconnect', (event, shardId) => {
+    console.warn(`Shard ${shardId} desconectado. Código: ${event?.code ?? 'desconocido'}`);
+    if (!client.connectionLostAt) {
+        client.connectionLostAt = Date.now();
+    }
+});
+
+client.on('shardResume', shardId => notifyConnectionRecovery(shardId, 'resume'));
+client.on('shardReady', shardId => notifyConnectionRecovery(shardId, 'ready'));
 
 // Cargar comandos (ahora en ./src/commands)
 const commands = [];
