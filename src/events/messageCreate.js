@@ -1,4 +1,4 @@
-const { Events, EmbedBuilder } = require('discord.js');
+const { Events, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const config = require('../../config/config.js');
 
 module.exports = {
@@ -184,40 +184,59 @@ module.exports = {
                 content: `⚠️ ${message.author}, tu mensaje contiene palabras prohibidas.`
             }).then(msg => setTimeout(() => msg.delete(), 5000));
 
+            const highlightedMessage = highlightBannedWords(message.content, matchedBannedWords);
+            const displayName = (message.member && message.member.displayName) || message.author.tag;
             const reportChannelId = config.autoModeration.reportChannelId;
+            const reviewChannelId = config.autoModeration.reviewChannelId;
+
             if (reportChannelId) {
                 try {
                     const reportChannel = await message.client.channels.fetch(reportChannelId).catch(() => null);
                     if (reportChannel) {
-                        const highlightedMessage = highlightBannedWords(message.content, matchedBannedWords);
-                        const displayName = (message.member && message.member.displayName) || message.author.tag;
-                        const embed = new EmbedBuilder()
-                            .setTitle('Automod')
-                            .setColor('#FF0000')
-                            .addFields(
-                                {
-                                    name: 'Usuario',
-                                    value: `${message.author.id} - ${displayName}`,
-                                    inline: false
-                                },
-                                {
-                                    name: 'Lo que dijo',
-                                    value: highlightedMessage.slice(0, 1024) || '*Sin contenido*',
-                                    inline: false
-                                }
-                            )
-                            .setTimestamp();
-
-                        if (message.guild) {
-                            embed.setFooter({
-                                text: `Servidor: ${message.guild.name} | Canal: #${message.channel?.name || message.channel.id}`
-                            });
-                        }
-
-                        await reportChannel.send({ embeds: [embed] });
+                        await reportChannel.send({ embeds: [createAutomodEmbed(message, displayName, highlightedMessage)] });
                     }
                 } catch (error) {
                     console.error('No se pudo enviar el log de automod:', error);
+                }
+            }
+
+            if (reviewChannelId) {
+                try {
+                    const reviewChannel = await message.client.channels.fetch(reviewChannelId).catch(() => null);
+                    if (reviewChannel) {
+                        if (!message.client.autoModReviewActions) {
+                            message.client.autoModReviewActions = new Map();
+                        }
+
+                        const reviewId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+                        const normalizedMatches = matchedBannedWords.map(word => word.toLowerCase());
+                        message.client.autoModReviewActions.set(reviewId, {
+                            words: normalizedMatches,
+                        });
+
+                        const cleanupTimeout = setTimeout(() => {
+                            message.client.autoModReviewActions.delete(reviewId);
+                        }, 24 * 60 * 60 * 1000);
+                        if (cleanupTimeout.unref) cleanupTimeout.unref();
+
+                        const buttonsRow = new ActionRowBuilder().addComponents(
+                            new ButtonBuilder()
+                                .setCustomId(`automod-review:good:${reviewId}`)
+                                .setLabel('Buen insulto')
+                                .setStyle(ButtonStyle.Success),
+                            new ButtonBuilder()
+                                .setCustomId(`automod-review:bad:${reviewId}`)
+                                .setLabel('Mal insulto')
+                                .setStyle(ButtonStyle.Danger)
+                        );
+
+                        await reviewChannel.send({
+                            embeds: [createAutomodEmbed(message, displayName, highlightedMessage)],
+                            components: [buttonsRow]
+                        });
+                    }
+                } catch (error) {
+                    console.error('No se pudo enviar el log de revisión de automod:', error);
                 }
             }
             return;
@@ -244,4 +263,31 @@ function highlightBannedWords(messageContent, bannedWords) {
         const regex = new RegExp(`(${escaped})`, 'gi');
         return acc.replace(regex, '**$1**');
     }, messageContent);
+}
+
+function createAutomodEmbed(message, displayName, highlightedMessage) {
+    const embed = new EmbedBuilder()
+        .setTitle('Automod')
+        .setColor('#FF0000')
+        .addFields(
+            {
+                name: 'Usuario',
+                value: `${message.author.id} - ${displayName}`,
+                inline: false
+            },
+            {
+                name: 'Lo que dijo',
+                value: highlightedMessage.slice(0, 1024) || '*Sin contenido*',
+                inline: false
+            }
+        )
+        .setTimestamp();
+
+    if (message.guild) {
+        embed.setFooter({
+            text: `Servidor: ${message.guild.name} | Canal: #${message.channel?.name || message.channel.id}`
+        });
+    }
+
+    return embed;
 }

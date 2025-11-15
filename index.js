@@ -56,6 +56,80 @@ const connectToMongo = async () => {
 
 client.commands = new Collection();
 client.giveaways = new Collection();
+client.autoModReviewActions = new Map();
+
+client.debugAllowedCommands = new Set(['update']);
+client.debugMode = false;
+client.debugState = null;
+client.pendingDebugNotification = false;
+client.debugNotificationSent = false;
+
+const buildDebugDescription = () => {
+    if (!client.debugState) {
+        return 'Canal: Logs\nInterior: Activado automáticamente en modo debug.';
+    }
+
+    const { reason, errorMessage } = client.debugState;
+    const details = [];
+
+    if (reason) {
+        details.push(`Motivo: ${reason}`);
+    }
+
+    if (errorMessage) {
+        const trimmed = errorMessage.length > 1800 ? `${errorMessage.slice(0, 1800)}…` : errorMessage;
+        details.push(`Detalle: ${trimmed}`);
+    }
+
+    if (details.length === 0) {
+        details.push('Detalle: No disponible');
+    }
+
+    return `Canal: Logs\nInterior: Activado automáticamente en modo debug.\n${details.join('\n')}`;
+};
+
+const notifyDebugMode = async () => {
+    if (!client.debugMode || client.debugNotificationSent) {
+        return;
+    }
+
+    try {
+        await client.log('Modo debug activado', 'Bot en modo debug', buildDebugDescription(), null);
+        client.debugNotificationSent = true;
+    } catch (err) {
+        console.error('Error enviando log de modo debug:', err.message);
+    }
+};
+
+const enterDebugMode = async (reason, error) => {
+    if (client.debugMode) {
+        return;
+    }
+
+    const errorMessage = error && error.message ? error.message : (typeof error === 'string' ? error : null);
+
+    client.debugMode = true;
+    client.debugState = {
+        reason: reason || 'Error no especificado',
+        errorMessage,
+        activatedAt: new Date().toISOString(),
+    };
+    client.pendingDebugNotification = true;
+
+    console.error('[MODO DEBUG] Activado automáticamente debido a un error:', {
+        reason: client.debugState.reason,
+        error: errorMessage || 'sin detalle',
+    });
+
+    if (client.isReady()) {
+        client.pendingDebugNotification = false;
+        await notifyDebugMode();
+        await deployCommands();
+    }
+};
+
+client.enterDebugMode = enterDebugMode;
+client.notifyDebugMode = notifyDebugMode;
 
 client.debugAllowedCommands = new Set(['update']);
 client.debugMode = false;
