@@ -3,6 +3,23 @@ const { Events } = require('discord.js');
 module.exports = {
     name: Events.InteractionCreate,
     async execute(interaction) {
+        if (interaction.client.debugMode) {
+            const allowedDuringDebug = interaction.client.debugAllowedCommands || new Set();
+            const isAllowedCommand = interaction.isChatInputCommand() && allowedDuringDebug.has(interaction.commandName);
+
+            if (!isAllowedCommand) {
+                if (interaction.isRepliable()) {
+                    const message = '⚠️ El bot se encuentra en modo debug automático. Los comandos y botones están temporalmente deshabilitados. Solo `/update` está disponible para administradores.';
+                    if (interaction.deferred || interaction.replied) {
+                        await interaction.followUp({ content: message, ephemeral: true }).catch(() => null);
+                    } else {
+                        await interaction.reply({ content: message, ephemeral: true }).catch(() => null);
+                    }
+                }
+                return;
+            }
+        }
+
         // Manejar comandos de barra
         if (interaction.isChatInputCommand()) {
             const command = interaction.client.commands.get(interaction.commandName);
