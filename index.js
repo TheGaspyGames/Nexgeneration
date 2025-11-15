@@ -46,27 +46,13 @@ const connectToMongo = async () => {
             useUnifiedTopology: true
         });
         console.log('MongoDB conectado');
+        await client.queueStartupLog('MongoDB', 'Conexión establecida', 'MongoDB conectado correctamente.');
     } catch (err) {
         console.error('MongoDB connection error:', err.message);
+        await client.queueStartupLog('MongoDB', 'Error de conexión', `No se pudo conectar: ${err.message}`);
         scheduleMongoReconnect();
     }
 };
-
-if (mongoUri) {
-    connectToMongo();
-
-    mongoose.connection.on('error', err => {
-        console.error('MongoDB connection error:', err.message || err);
-        scheduleMongoReconnect();
-    });
-
-    mongoose.connection.on('disconnected', () => {
-        console.warn('MongoDB desconectado. Intentando reconectar automáticamente...');
-        scheduleMongoReconnect();
-    });
-} else {
-    console.log('MONGODB_URI no configurado, usando almacenamiento en archivos si está implementado.');
-}
 
 client.commands = new Collection();
 client.giveaways = new Collection();
@@ -243,6 +229,71 @@ client.log = async function (type, title, description, executor) {
     }
 };
 
+client.startupLogEntries = [];
+client.startupLogsFlushed = false;
+
+client.queueStartupLog = function (type, title, description) {
+    const entry = {
+        type: type || 'Estado',
+        title: title || 'Inicio',
+        description: description || 'Sin detalles adicionales.'
+    };
+
+    if (client.startupLogsFlushed && client.isReady()) {
+        return client.log(entry.type, entry.title, entry.description, null).catch(err => {
+            console.error('Error enviando log encolado:', err.message);
+        });
+    }
+
+    client.startupLogEntries.push(entry);
+    return Promise.resolve();
+};
+
+client.flushStartupLogs = async function () {
+    if (client.startupLogsFlushed) {
+        return;
+    }
+
+    client.startupLogsFlushed = true;
+
+    if (!Array.isArray(client.startupLogEntries) || client.startupLogEntries.length === 0) {
+        client.startupLogEntries = [];
+        return;
+    }
+
+    const entries = [...client.startupLogEntries];
+    client.startupLogEntries = [];
+
+    for (const entry of entries) {
+        try {
+            await client.log(entry.type, entry.title, entry.description, null);
+        } catch (err) {
+            console.error('Error enviando log de inicio:', err.message);
+        }
+    }
+};
+
+if (mongoUri) {
+    connectToMongo();
+
+    mongoose.connection.on('error', async err => {
+        console.error('MongoDB connection error:', err.message || err);
+        await client.queueStartupLog('MongoDB', 'Error detectado', `Se perdió la conexión: ${err.message || err}`);
+        scheduleMongoReconnect();
+    });
+
+    mongoose.connection.on('disconnected', async () => {
+        const warning = 'MongoDB desconectado. Intentando reconectar automáticamente...';
+        console.warn(warning);
+        await client.queueStartupLog('MongoDB', 'Desconectado', warning);
+        scheduleMongoReconnect();
+    });
+} else {
+    const notice = 'MONGODB_URI no configurado, usando almacenamiento en archivos si está implementado.';
+    console.log(notice);
+    client.queueStartupLog('MongoDB', 'Sin configuración', notice);
+}
+
 client.connectionLostAt = null;
 
 const notifyConnectionRecovery = async (shardId, originEvent) => {
@@ -355,7 +406,7 @@ for (const file of eventFiles) {
 
 // Registrar comandos al iniciar y conectar el bot
 client.once('ready', async () => {
-    console.log(`¡Bot listo! Conectado como ${client.user.tag}`);
+    await client.flushStartupLogs();
 
     if (client.pendingDebugNotification) {
         client.pendingDebugNotification = false;
