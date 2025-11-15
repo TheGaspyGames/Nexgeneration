@@ -15,6 +15,57 @@ module.exports = {
                 message.client.giveawayManager.messageCount.set(message.author.id, currentCount + 1);
             }
 
+            if (!message.client.ipResponseCooldowns) {
+                message.client.ipResponseCooldowns = new Map();
+            }
+
+            const normalizedContent = message.content
+                .toLowerCase()
+                .normalize('NFD')
+                .replace(/[^\p{L}\p{N}\s¿?¡!.,:;-]/gu, '')
+                .replace(/[¡!¿?.,:;-]/g, '')
+                .replace(/\s+/g, ' ')
+                .trim();
+
+            const ipTriggers = [
+                'ip',
+                'ip del server',
+                'ip del servidor',
+                'ip server',
+                'ip servidor',
+                'cual es la ip',
+                'cual es la ip del server',
+                'cual es la ip del servidor',
+                'cual es la ip server',
+            ];
+
+            if (normalizedContent && ipTriggers.includes(normalizedContent)) {
+                const now = Date.now();
+                const cooldownKey = message.guild ? `guild:${message.guild.id}` : `user:${message.author.id}`;
+                const cooldownMs = 5 * 60 * 1000; // 5 minutos
+                const lastTrigger = message.client.ipResponseCooldowns.get(cooldownKey);
+
+                if (lastTrigger && (now - lastTrigger) < cooldownMs) {
+                    return;
+                }
+
+                message.client.ipResponseCooldowns.set(cooldownKey, now);
+
+                const response = [
+                    `Hola ${message.author} la ip es la siguiente`,
+                    'Java: `nexgneration.sdlf.fun`',
+                    'Bedrock: `nexgneration.sdlf.fun` o `ns570401.seedloaf.com`',
+                    'Puerto: `49376`',
+                    '',
+                    'Las versiones disponibles son de la 1.12 en adelante!',
+                    '',
+                    'Pásala bien en el server!<:gato_mirada:1192169587932934344>'
+                ].join('\n');
+
+                await message.reply({ content: response });
+                return;
+            }
+
             // Verificar si la automoderación está activada
             if (!config.autoModeration.enabled) return;
 
