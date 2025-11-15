@@ -21,25 +21,115 @@ const client = new Client({
 // Conectar a MongoDB si existe MONGODB_URI
 const mongoose = require('mongoose');
 const mongoUri = process.env.MONGODB_URI || process.env.MONGO_URI || null;
-if (mongoUri) {
-    mongoose.connect(mongoUri, {
-        useNewUrlParser: true,
-        useUnifiedTopology: true
-    }).then(() => console.log('MongoDB conectado')).catch(err => console.error('MongoDB connection error:', err.message));
 
-    mongoose.connection.on('error', err => {
-        console.error('MongoDB connection error:', err.message || err);
-    });
+let mongoReconnectTimeout = null;
 
-    mongoose.connection.on('disconnected', () => {
-        console.warn('MongoDB desconectado. Las funciones que dependen de la base de datos usarán modos degradados.');
-    });
-} else {
-    console.log('MONGODB_URI no configurado, usando almacenamiento en archivos si está implementado.');
-}
+const scheduleMongoReconnect = () => {
+    if (mongoReconnectTimeout || !mongoUri) return;
+    mongoReconnectTimeout = setTimeout(() => {
+        mongoReconnectTimeout = null;
+        connectToMongo();
+    }, 5000);
+};
+
+const connectToMongo = async () => {
+    if (!mongoUri) return;
+
+    if (mongoose.connection.readyState === 1 || mongoose.connection.readyState === 2) {
+        // Ya conectado o conectando
+        return;
+    }
+
+    try {
+        await mongoose.connect(mongoUri, {
+            useNewUrlParser: true,
+            useUnifiedTopology: true
+        });
+        console.log('MongoDB conectado');
+        await client.queueStartupLog('MongoDB', 'Conexión establecida', 'MongoDB conectado correctamente.');
+    } catch (err) {
+        console.error('MongoDB connection error:', err.message);
+        await client.queueStartupLog('MongoDB', 'Error de conexión', `No se pudo conectar: ${err.message}`);
+        scheduleMongoReconnect();
+    }
+};
 
 client.commands = new Collection();
 client.giveaways = new Collection();
+client.autoModReviewActions = new Map();
+
+client.debugAllowedCommands = new Set(['update']);
+client.debugMode = false;
+client.debugState = null;
+client.pendingDebugNotification = false;
+client.debugNotificationSent = false;
+
+const buildDebugDescription = () => {
+    if (!client.debugState) {
+        return 'Canal: Logs\nInterior: Activado automáticamente en modo debug.';
+    }
+
+    const { reason, errorMessage } = client.debugState;
+    const details = [];
+
+    if (reason) {
+        details.push(`Motivo: ${reason}`);
+    }
+
+    if (errorMessage) {
+        const trimmed = errorMessage.length > 1800 ? `${errorMessage.slice(0, 1800)}…` : errorMessage;
+        details.push(`Detalle: ${trimmed}`);
+    }
+
+    if (details.length === 0) {
+        details.push('Detalle: No disponible');
+    }
+
+    return `Canal: Logs\nInterior: Activado automáticamente en modo debug.\n${details.join('\n')}`;
+};
+
+const notifyDebugMode = async () => {
+    if (!client.debugMode || client.debugNotificationSent) {
+        return;
+    }
+
+    try {
+        await client.log('Modo debug activado', 'Bot en modo debug', buildDebugDescription(), null);
+        client.debugNotificationSent = true;
+    } catch (err) {
+        console.error('Error enviando log de modo debug:', err.message);
+    }
+};
+
+const enterDebugMode = async (reason, error) => {
+    if (client.debugMode) {
+        return;
+    }
+
+    const errorMessage = error && error.message ? error.message : (typeof error === 'string' ? error : null);
+
+    client.debugMode = true;
+    client.debugState = {
+        reason: reason || 'Error no especificado',
+        errorMessage,
+        activatedAt: new Date().toISOString(),
+    };
+    client.pendingDebugNotification = true;
+
+    console.error('[MODO DEBUG] Activado automáticamente debido a un error:', {
+        reason: client.debugState.reason,
+        error: errorMessage || 'sin detalle',
+    });
+
+    if (client.isReady()) {
+        client.pendingDebugNotification = false;
+        await notifyDebugMode();
+        await deployCommands();
+    }
+};
+
+client.enterDebugMode = enterDebugMode;
+client.notifyDebugMode = notifyDebugMode;
 
 // Cargar settings persistentes (ruta relativa a la raíz)
 const settingsPath = path.join(__dirname, 'config', 'settings.json');
@@ -141,8 +231,147 @@ client.log = async function (type, title, description, executor) {
     }
 };
 
+client.startupLogEntries = [];
+client.startupLogsFlushed = false;
+
+client.queueStartupLog = function (type, title, description, options = {}) {
+    const fallbackChannel = options.channel || 'Logs';
+    const rawDescription = typeof description === 'string' && description.trim().length > 0
+        ? description
+        : 'Sin detalles adicionales.';
+    const interiorText = typeof options.interior === 'string' && options.interior.trim().length > 0
+        ? options.interior.trim()
+        : rawDescription;
+
+    const formattedDescription = (/Canal:/i.test(rawDescription) && /Interior:/i.test(rawDescription))
+        ? rawDescription
+        : `Canal: ${fallbackChannel}\nInterior: ${interiorText}`;
+
+    const trimmedSummarySource = options.summary || interiorText;
+    const summary = trimmedSummarySource.length > 300
+        ? `${trimmedSummarySource.slice(0, 297)}…`
+        : trimmedSummarySource;
+
+    const entry = {
+        type: type || 'Estado',
+        title: title || 'Inicio',
+        description: formattedDescription,
+        summary,
+        channel: fallbackChannel
+    };
+
+    if (client.startupLogsFlushed && client.isReady()) {
+        return client.log(entry.type, entry.title, entry.description, null).catch(err => {
+            console.error('Error enviando log encolado:', err.message);
+        });
+    }
+
+    client.startupLogEntries.push(entry);
+    return Promise.resolve();
+};
+
+client.flushStartupLogs = async function () {
+    if (client.startupLogsFlushed) {
+        return;
+    }
+
+    client.startupLogsFlushed = true;
+
+    if (!Array.isArray(client.startupLogEntries) || client.startupLogEntries.length === 0) {
+        client.startupLogEntries = [];
+        return;
+    }
+
+    const entries = [...client.startupLogEntries];
+    client.startupLogEntries = [];
+
+    for (const entry of entries) {
+        try {
+            await client.log(entry.type, entry.title, entry.description, null);
+        } catch (err) {
+            console.error('Error enviando log de inicio:', err.message);
+        }
+    }
+
+    try {
+        const summaryLines = entries
+            .map(entry => `• [${entry.type}] ${entry.title}: ${entry.summary}`)
+            .join('\n');
+
+        if (summaryLines.trim().length > 0) {
+            await client.log(
+                'Estado',
+                'Resumen de inicio',
+                `Canal: ${entries[0]?.channel || 'Logs'}\nInterior: ${summaryLines}`,
+                null
+            );
+        }
+    } catch (err) {
+        console.error('Error enviando resumen de inicio:', err.message);
+    }
+};
+
+if (mongoUri) {
+    connectToMongo();
+
+    mongoose.connection.on('error', async err => {
+        console.error('MongoDB connection error:', err.message || err);
+        await client.queueStartupLog('MongoDB', 'Error detectado', `Se perdió la conexión: ${err.message || err}`);
+        scheduleMongoReconnect();
+    });
+
+    mongoose.connection.on('disconnected', async () => {
+        const warning = 'MongoDB desconectado. Intentando reconectar automáticamente...';
+        console.warn(warning);
+        await client.queueStartupLog('MongoDB', 'Desconectado', warning);
+        scheduleMongoReconnect();
+    });
+} else {
+    const notice = 'MONGODB_URI no configurado, usando almacenamiento en archivos si está implementado.';
+    console.log(notice);
+    client.queueStartupLog('MongoDB', 'Sin configuración', notice);
+}
+
+client.connectionLostAt = null;
+
+const notifyConnectionRecovery = async (shardId, originEvent) => {
+    if (!client.connectionLostAt) return;
+
+    const downtimeMs = Date.now() - client.connectionLostAt;
+    const downtimeSeconds = Math.max(1, Math.round(downtimeMs / 1000));
+    const description = `Canal: Logs\nInterior: Conexión restablecida (${originEvent}) tras ${downtimeSeconds} segundos. Shard: ${shardId}`;
+
+    try {
+        await client.log('Conexión restaurada', `Shard ${shardId} reconectado`, description, null);
+    } catch (err) {
+        console.error('Error enviando log de reconexión:', err.message);
+    } finally {
+        client.connectionLostAt = null;
+    }
+};
+
+client.on('shardDisconnect', (event, shardId) => {
+    console.warn(`Shard ${shardId} desconectado. Código: ${event?.code ?? 'desconocido'}`);
+    if (!client.connectionLostAt) {
+        client.connectionLostAt = Date.now();
+    }
+});
+
+client.on('shardResume', shardId => notifyConnectionRecovery(shardId, 'resume'));
+client.on('shardReady', shardId => notifyConnectionRecovery(shardId, 'ready'));
+
+client.on('error', error => {
+    console.error('Discord client error:', error);
+    client.enterDebugMode('Error del cliente de Discord', error);
+});
+
+client.on('shardError', (error, shardId) => {
+    console.error(`Error en el shard ${shardId}:`, error);
+    client.enterDebugMode(`Error en shard ${shardId}`, error);
+});
+
 // Cargar comandos (ahora en ./src/commands)
-const commands = [];
+const commandData = [];
 const commandsPath = path.join(__dirname, 'src', 'commands');
 const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
 
@@ -150,7 +379,8 @@ for (const file of commandFiles) {
     const filePath = path.join(commandsPath, file);
     const command = require(filePath);
     if ('data' in command && 'execute' in command) {
-        commands.push(command.data.toJSON());
+        const jsonData = command.data.toJSON();
+        commandData.push(jsonData);
         client.commands.set(command.data.name, command);
     }
 }
@@ -161,7 +391,17 @@ const BOT_TOKEN = process.env.TOKEN || process.env.DISCORD_TOKEN || process.env.
 // Función para registrar comandos
 async function deployCommands() {
     try {
-        console.log(`Iniciando el registro de ${commands.length} comandos.`);
+        const body = client.debugMode
+            ? commandData.filter(cmd => client.debugAllowedCommands.has(cmd.name))
+            : commandData;
+        const countText = client.debugMode
+            ? `${body.length} (modo debug activo)`
+            : `${commandData.length}`;
+        console.log(`Iniciando el registro de ${countText} comandos.`);
+
+        if (client.debugMode && body.length === 0) {
+            console.warn('Modo debug activo pero no se encontraron comandos permitidos.');
+        }
 
         const rest = new REST().setToken(BOT_TOKEN);
         // Determinar applicationId y guildId (priorizar env, luego settings, luego client)
@@ -177,16 +417,20 @@ async function deployCommands() {
         if (guildId) {
             data = await rest.put(
                 Routes.applicationGuildCommands(appId, guildId),
-                { body: commands },
+                { body },
             );
-            console.log(`¡${data.length} comandos registrados exitosamente en el servidor ${guildId}!`);
+            console.log(`Comandos ${client.debugMode ? 'deshabilitados' : 'registrados'} exitosamente en el servidor ${guildId} (${data.length}).`);
         } else {
             // Registrar globalmente si no hay guild configurado
             data = await rest.put(
                 Routes.applicationCommands(appId),
-                { body: commands },
+                { body },
             );
-            console.log(`¡${data.length} comandos registrados globalmente! (puede tardar hasta 1 hora en propagarse)`);
+            console.log(`Comandos ${client.debugMode ? 'deshabilitados globalmente' : 'registrados globalmente'} (${data.length}).`);
+        }
+
+        if (client.debugMode) {
+            await notifyDebugMode();
         }
     } catch (error) {
         console.error('Error al registrar los comandos:', error);
@@ -208,9 +452,15 @@ for (const file of eventFiles) {
 }
 
 // Registrar comandos al iniciar y conectar el bot
-client.once('ready', () => {
-    console.log(`¡Bot listo! Conectado como ${client.user.tag}`);
-    deployCommands();
+client.once('ready', async () => {
+    await client.flushStartupLogs();
+
+    if (client.pendingDebugNotification) {
+        client.pendingDebugNotification = false;
+        await notifyDebugMode();
+    }
+
+    await deployCommands();
 });
 
 // Iniciar sesión con el token resuelto
@@ -220,3 +470,13 @@ if (!BOT_TOKEN) {
 }
 
 client.login(BOT_TOKEN);
+
+process.on('unhandledRejection', error => {
+    console.error('Unhandled promise rejection detectada:', error);
+    client.enterDebugMode('Unhandled promise rejection', error);
+});
+
+process.on('uncaughtException', error => {
+    console.error('Uncaught exception detectada:', error);
+    client.enterDebugMode('Uncaught exception', error);
+});

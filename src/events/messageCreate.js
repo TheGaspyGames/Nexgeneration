@@ -1,4 +1,4 @@
-const { Events } = require('discord.js');
+const { Events, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const config = require('../../config/config.js');
 
 module.exports = {
@@ -15,8 +15,68 @@ module.exports = {
                 message.client.giveawayManager.messageCount.set(message.author.id, currentCount + 1);
             }
 
-            // Verificar si la automoderación está activada
-            if (!config.autoModeration.enabled) return;
+            if (!message.client.ipResponseCooldowns) {
+                message.client.ipResponseCooldowns = new Map();
+            }
+
+            const normalizedContent = message.content
+                .toLowerCase()
+                .normalize('NFD')
+                .replace(/[^\p{L}\p{N}\s¿?¡!.,:;-]/gu, '')
+                .replace(/[¡!¿?.,:;-]/g, '')
+                .replace(/\s+/g, ' ')
+                .trim();
+
+            const ipTriggers = [
+                'ip',
+                'ip del server',
+                'ip del servidor',
+                'ip server',
+                'ip servidor',
+                'cual es la ip',
+                'cual es la ip del server',
+                'cual es la ip del servidor',
+                'cual es la ip server',
+            ];
+
+            if (normalizedContent && ipTriggers.includes(normalizedContent)) {
+                const now = Date.now();
+                const cooldownKey = message.guild ? `guild:${message.guild.id}` : `user:${message.author.id}`;
+                const cooldownMs = 5 * 60 * 1000; // 5 minutos
+                const lastTrigger = message.client.ipResponseCooldowns.get(cooldownKey);
+
+                if (lastTrigger && (now - lastTrigger) < cooldownMs) {
+                    return;
+                }
+
+                message.client.ipResponseCooldowns.set(cooldownKey, now);
+
+                const response = [
+                    `Hola ${message.author} la ip es la siguiente`,
+                    'Java: `nexgneration.sdlf.fun`',
+                    'Bedrock: `nexgneration.sdlf.fun` o `ns570401.seedloaf.com`',
+                    'Puerto: `49376`',
+                    '',
+                    'Las versiones disponibles son de la 1.12 en adelante!',
+                    '',
+                    'Pásala bien en el server!<:gato_mirada:1192169587932934344>'
+                ].join('\n');
+
+                await message.reply({ content: response });
+                return;
+            }
+
+        // Verificar si la automoderación está activada
+        if (!config.autoModeration.enabled) return;
+
+        // Ignorar usuarios o roles exentos del automod
+        if (config.autoModeration.ignoredUsers.includes(message.author.id)) {
+            return;
+        }
+
+        if (message.member && message.member.roles.cache.some(role => config.autoModeration.ignoredRoles.includes(role.id))) {
+            return;
+        }
 
             // Si AI flagging está activado, ejecutar un análisis real (OpenAI si hay API key, sino fallback de palabras)
             if (config.autoModeration.aiFlagging) {
@@ -113,16 +173,72 @@ module.exports = {
         }
 
         // Verificar palabras prohibidas
-        const content = message.content.toLowerCase();
-        const containsBannedWord = config.autoModeration.bannedWords.some(word => 
-            content.includes(word.toLowerCase())
+        const loweredContent = message.content.toLowerCase();
+        const matchedBannedWords = config.autoModeration.bannedWords.filter(word =>
+            loweredContent.includes(word.toLowerCase())
         );
 
-        if (containsBannedWord) {
+        if (matchedBannedWords.length) {
             await message.delete();
             await message.channel.send({
                 content: `⚠️ ${message.author}, tu mensaje contiene palabras prohibidas.`
             }).then(msg => setTimeout(() => msg.delete(), 5000));
+
+            const highlightedMessage = highlightBannedWords(message.content, matchedBannedWords);
+            const displayName = (message.member && message.member.displayName) || message.author.tag;
+            const reportChannelId = config.autoModeration.reportChannelId;
+            const reviewChannelId = config.autoModeration.reviewChannelId;
+
+            if (reportChannelId) {
+                try {
+                    const reportChannel = await message.client.channels.fetch(reportChannelId).catch(() => null);
+                    if (reportChannel) {
+                        await reportChannel.send({ embeds: [createAutomodEmbed(message, displayName, highlightedMessage)] });
+                    }
+                } catch (error) {
+                    console.error('No se pudo enviar el log de automod:', error);
+                }
+            }
+
+            if (reviewChannelId) {
+                try {
+                    const reviewChannel = await message.client.channels.fetch(reviewChannelId).catch(() => null);
+                    if (reviewChannel) {
+                        if (!message.client.autoModReviewActions) {
+                            message.client.autoModReviewActions = new Map();
+                        }
+
+                        const reviewId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+                        const normalizedMatches = matchedBannedWords.map(word => word.toLowerCase());
+                        message.client.autoModReviewActions.set(reviewId, {
+                            words: normalizedMatches,
+                        });
+
+                        const cleanupTimeout = setTimeout(() => {
+                            message.client.autoModReviewActions.delete(reviewId);
+                        }, 24 * 60 * 60 * 1000);
+                        if (cleanupTimeout.unref) cleanupTimeout.unref();
+
+                        const buttonsRow = new ActionRowBuilder().addComponents(
+                            new ButtonBuilder()
+                                .setCustomId(`automod-review:good:${reviewId}`)
+                                .setLabel('Buen insulto')
+                                .setStyle(ButtonStyle.Success),
+                            new ButtonBuilder()
+                                .setCustomId(`automod-review:bad:${reviewId}`)
+                                .setLabel('Mal insulto')
+                                .setStyle(ButtonStyle.Danger)
+                        );
+
+                        await reviewChannel.send({
+                            embeds: [createAutomodEmbed(message, displayName, highlightedMessage)],
+                            components: [buttonsRow]
+                        });
+                    }
+                } catch (error) {
+                    console.error('No se pudo enviar el log de revisión de automod:', error);
+                }
+            }
             return;
         }
 
@@ -137,3 +253,41 @@ module.exports = {
         }
     },
 };
+
+function highlightBannedWords(messageContent, bannedWords) {
+    if (!messageContent) return '*Sin contenido*';
+
+    return bannedWords.reduce((acc, word) => {
+        if (!word) return acc;
+        const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const regex = new RegExp(`(${escaped})`, 'gi');
+        return acc.replace(regex, '**$1**');
+    }, messageContent);
+}
+
+function createAutomodEmbed(message, displayName, highlightedMessage) {
+    const embed = new EmbedBuilder()
+        .setTitle('Automod')
+        .setColor('#FF0000')
+        .addFields(
+            {
+                name: 'Usuario',
+                value: `${message.author.id} - ${displayName}`,
+                inline: false
+            },
+            {
+                name: 'Lo que dijo',
+                value: highlightedMessage.slice(0, 1024) || '*Sin contenido*',
+                inline: false
+            }
+        )
+        .setTimestamp();
+
+    if (message.guild) {
+        embed.setFooter({
+            text: `Servidor: ${message.guild.name} | Canal: #${message.channel?.name || message.channel.id}`
+        });
+    }
+
+    return embed;
+}
