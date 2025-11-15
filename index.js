@@ -63,8 +63,60 @@ client.debugMode = false;
 client.debugState = null;
 client.pendingDebugNotification = false;
 client.debugNotificationSent = false;
+client.startupPhase = true;
+client.startupErrorTriggered = false;
+client.debugModeRestored = false;
 
-const buildDebugDescription = () => {
+const debugStatePath = path.join(__dirname, 'config', 'debug-state.json');
+const defaultDebugState = {
+    active: false,
+    reason: null,
+    errorMessage: null,
+    activatedAt: null,
+    triggeredDuringStartup: false,
+};
+
+const readDebugStateFromDisk = () => {
+    try {
+        if (!fs.existsSync(debugStatePath)) {
+            return { ...defaultDebugState };
+        }
+
+        const raw = fs.readFileSync(debugStatePath, 'utf8').trim();
+        if (raw.length === 0) {
+            return { ...defaultDebugState };
+        }
+
+        const parsed = JSON.parse(raw);
+        return { ...defaultDebugState, ...parsed };
+    } catch (err) {
+        console.error('No se pudo leer debug-state.json:', err.message);
+        return { ...defaultDebugState };
+    }
+};
+
+const persistDebugState = (state) => {
+    try {
+        const payload = { ...defaultDebugState, ...state };
+        fs.writeFileSync(debugStatePath, JSON.stringify(payload, null, 2));
+    } catch (err) {
+        console.error('No se pudo guardar debug-state.json:', err.message);
+    }
+};
+
+if (!fs.existsSync(debugStatePath)) {
+    persistDebugState(defaultDebugState);
+}
+
+const initialDebugState = readDebugStateFromDisk();
+if (initialDebugState.active) {
+    client.debugMode = true;
+    client.debugState = initialDebugState;
+    client.pendingDebugNotification = true;
+    client.debugModeRestored = true;
+}
+
+client.buildDebugDescription = () => {
     if (!client.debugState) {
         return 'Canal: Logs\nInterior: Activado automáticamente en modo debug.';
     }
@@ -94,7 +146,7 @@ const notifyDebugMode = async () => {
     }
 
     try {
-        await client.log('Modo debug activado', 'Bot en modo debug', buildDebugDescription(), null);
+        await client.log('Modo debug activado', 'Bot en modo debug', client.buildDebugDescription(), null);
         client.debugNotificationSent = true;
     } catch (err) {
         console.error('Error enviando log de modo debug:', err.message);
@@ -113,8 +165,15 @@ const enterDebugMode = async (reason, error) => {
         reason: reason || 'Error no especificado',
         errorMessage,
         activatedAt: new Date().toISOString(),
+        triggeredDuringStartup: client.startupPhase,
     };
     client.pendingDebugNotification = true;
+    client.startupErrorTriggered = client.startupErrorTriggered || client.startupPhase;
+
+    persistDebugState({
+        active: true,
+        ...client.debugState,
+    });
 
     console.error('[MODO DEBUG] Activado automáticamente debido a un error:', {
         reason: client.debugState.reason,
@@ -128,81 +187,44 @@ const enterDebugMode = async (reason, error) => {
     }
 };
 
-client.enterDebugMode = enterDebugMode;
-client.notifyDebugMode = notifyDebugMode;
-
-client.debugAllowedCommands = new Set(['update']);
-client.debugMode = false;
-client.debugState = null;
-client.pendingDebugNotification = false;
-client.debugNotificationSent = false;
-
-const buildDebugDescription = () => {
-    if (!client.debugState) {
-        return 'Canal: Logs\nInterior: Activado automáticamente en modo debug.';
-    }
-
-    const { reason, errorMessage } = client.debugState;
-    const details = [];
-
-    if (reason) {
-        details.push(`Motivo: ${reason}`);
-    }
-
-    if (errorMessage) {
-        const trimmed = errorMessage.length > 1800 ? `${errorMessage.slice(0, 1800)}…` : errorMessage;
-        details.push(`Detalle: ${trimmed}`);
-    }
-
-    if (details.length === 0) {
-        details.push('Detalle: No disponible');
-    }
-
-    return `Canal: Logs\nInterior: Activado automáticamente en modo debug.\n${details.join('\n')}`;
-};
-
-const notifyDebugMode = async () => {
-    if (!client.debugMode || client.debugNotificationSent) {
+const exitDebugMode = async (options = {}) => {
+    if (!client.debugMode) {
+        persistDebugState({ active: false });
+        client.debugModeRestored = false;
         return;
     }
 
-    try {
-        await client.log('Modo debug activado', 'Bot en modo debug', buildDebugDescription(), null);
-        client.debugNotificationSent = true;
-    } catch (err) {
-        console.error('Error enviando log de modo debug:', err.message);
-    }
-};
+    client.debugMode = false;
+    client.debugState = null;
+    client.pendingDebugNotification = false;
+    client.debugNotificationSent = false;
+    client.debugModeRestored = false;
+    client.startupErrorTriggered = false;
 
-const enterDebugMode = async (reason, error) => {
-    if (client.debugMode) {
-        return;
-    }
+    const description = `Canal: Logs\nInterior: ${options.reason || 'Modo debug desactivado automáticamente tras reinicio.'}`;
 
-    const errorMessage = error && error.message ? error.message : (typeof error === 'string' ? error : null);
-
-    client.debugMode = true;
-    client.debugState = {
-        reason: reason || 'Error no especificado',
-        errorMessage,
-        activatedAt: new Date().toISOString(),
-    };
-    client.pendingDebugNotification = true;
-
-    console.error('[MODO DEBUG] Activado automáticamente debido a un error:', {
-        reason: client.debugState.reason,
-        error: errorMessage || 'sin detalle',
+    persistDebugState({
+        active: false,
+        clearedAt: new Date().toISOString(),
+        clearedReason: options.reason || 'Reinicio completado',
     });
 
-    if (client.isReady()) {
-        client.pendingDebugNotification = false;
-        await notifyDebugMode();
+    if (!options.skipLog) {
+        try {
+            await client.log('Modo debug desactivado', 'Bot operativo', description, options.executor || null);
+        } catch (err) {
+            console.error('Error enviando log de desactivación de modo debug:', err.message);
+        }
+    }
+
+    if (!options.skipCommandDeploy) {
         await deployCommands();
     }
 };
 
 client.enterDebugMode = enterDebugMode;
 client.notifyDebugMode = notifyDebugMode;
+client.exitDebugMode = exitDebugMode;
 
 // Cargar settings persistentes (ruta relativa a la raíz)
 const settingsPath = path.join(__dirname, 'config', 'settings.json');
@@ -526,6 +548,7 @@ for (const file of eventFiles) {
 
 // Registrar comandos al iniciar y conectar el bot
 client.once('ready', async () => {
+    client.startupPhase = false;
     await client.flushStartupLogs();
 
     if (client.pendingDebugNotification) {
@@ -534,6 +557,12 @@ client.once('ready', async () => {
     }
 
     await deployCommands();
+
+    if (client.debugMode && client.debugModeRestored && !client.startupErrorTriggered) {
+        await client.exitDebugMode({
+            reason: 'Reinicio completado sin errores detectados.',
+        });
+    }
 });
 
 // Iniciar sesión con el token resuelto
