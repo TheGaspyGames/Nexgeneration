@@ -257,12 +257,25 @@ module.exports = {
 function highlightBannedWords(messageContent, bannedWords) {
     if (!messageContent) return '*Sin contenido*';
 
-    return bannedWords.reduce((acc, word) => {
-        if (!word) return acc;
-        const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const regex = new RegExp(`(${escaped})`, 'gi');
-        return acc.replace(regex, '**$1**');
-    }, messageContent);
+    const uniqueWords = [...new Set(
+        (bannedWords || [])
+            .map(word => (typeof word === 'string' ? word.trim() : ''))
+            .filter(Boolean)
+    )];
+
+    if (!uniqueWords.length) return messageContent;
+
+    // Sort by length so longer phrases ("hijo de puta") are highlighted before their substrings.
+    uniqueWords.sort((a, b) => b.length - a.length);
+
+    const escapedAlternatives = uniqueWords
+        .map(word => word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+        .join('|');
+
+    if (!escapedAlternatives) return messageContent;
+
+    const regex = new RegExp(`(${escapedAlternatives})`, 'gi');
+    return messageContent.replace(regex, '**$1**');
 }
 
 function createAutomodEmbed(message, displayName, highlightedMessage) {
