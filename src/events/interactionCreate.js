@@ -4,15 +4,20 @@ module.exports = {
     name: Events.InteractionCreate,
     async execute(interaction) {
         if (interaction.client.debugMode) {
-            if (interaction.isRepliable()) {
-                const message = '⚠️ El bot se encuentra en modo debug automático. Los comandos y botones están temporalmente deshabilitados.';
-                if (interaction.deferred || interaction.replied) {
-                    await interaction.followUp({ content: message, ephemeral: true }).catch(() => null);
-                } else {
-                    await interaction.reply({ content: message, ephemeral: true }).catch(() => null);
+            const allowedDuringDebug = interaction.client.debugAllowedCommands || new Set();
+            const isAllowedCommand = interaction.isChatInputCommand() && allowedDuringDebug.has(interaction.commandName);
+
+            if (!isAllowedCommand) {
+                if (interaction.isRepliable()) {
+                    const message = '⚠️ El bot se encuentra en modo debug automático. Los comandos y botones están temporalmente deshabilitados. Solo `/update` está disponible para administradores.';
+                    if (interaction.deferred || interaction.replied) {
+                        await interaction.followUp({ content: message, ephemeral: true }).catch(() => null);
+                    } else {
+                        await interaction.reply({ content: message, ephemeral: true }).catch(() => null);
+                    }
                 }
+                return;
             }
-            return;
         }
 
         // Manejar comandos de barra

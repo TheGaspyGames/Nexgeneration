@@ -57,6 +57,7 @@ const connectToMongo = async () => {
 client.commands = new Collection();
 client.giveaways = new Collection();
 
+client.debugAllowedCommands = new Set(['update']);
 client.debugMode = false;
 client.debugState = null;
 client.pendingDebugNotification = false;
@@ -232,11 +233,30 @@ client.log = async function (type, title, description, executor) {
 client.startupLogEntries = [];
 client.startupLogsFlushed = false;
 
-client.queueStartupLog = function (type, title, description) {
+client.queueStartupLog = function (type, title, description, options = {}) {
+    const fallbackChannel = options.channel || 'Logs';
+    const rawDescription = typeof description === 'string' && description.trim().length > 0
+        ? description
+        : 'Sin detalles adicionales.';
+    const interiorText = typeof options.interior === 'string' && options.interior.trim().length > 0
+        ? options.interior.trim()
+        : rawDescription;
+
+    const formattedDescription = (/Canal:/i.test(rawDescription) && /Interior:/i.test(rawDescription))
+        ? rawDescription
+        : `Canal: ${fallbackChannel}\nInterior: ${interiorText}`;
+
+    const trimmedSummarySource = options.summary || interiorText;
+    const summary = trimmedSummarySource.length > 300
+        ? `${trimmedSummarySource.slice(0, 297)}…`
+        : trimmedSummarySource;
+
     const entry = {
         type: type || 'Estado',
         title: title || 'Inicio',
-        description: description || 'Sin detalles adicionales.'
+        description: formattedDescription,
+        summary,
+        channel: fallbackChannel
     };
 
     if (client.startupLogsFlushed && client.isReady()) {
@@ -270,6 +290,23 @@ client.flushStartupLogs = async function () {
         } catch (err) {
             console.error('Error enviando log de inicio:', err.message);
         }
+    }
+
+    try {
+        const summaryLines = entries
+            .map(entry => `• [${entry.type}] ${entry.title}: ${entry.summary}`)
+            .join('\n');
+
+        if (summaryLines.trim().length > 0) {
+            await client.log(
+                'Estado',
+                'Resumen de inicio',
+                `Canal: ${entries[0]?.channel || 'Logs'}\nInterior: ${summaryLines}`,
+                null
+            );
+        }
+    } catch (err) {
+        console.error('Error enviando resumen de inicio:', err.message);
     }
 };
 
@@ -333,7 +370,7 @@ client.on('shardError', (error, shardId) => {
 });
 
 // Cargar comandos (ahora en ./src/commands)
-const commands = [];
+const commandData = [];
 const commandsPath = path.join(__dirname, 'src', 'commands');
 const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
 
@@ -341,7 +378,8 @@ for (const file of commandFiles) {
     const filePath = path.join(commandsPath, file);
     const command = require(filePath);
     if ('data' in command && 'execute' in command) {
-        commands.push(command.data.toJSON());
+        const jsonData = command.data.toJSON();
+        commandData.push(jsonData);
         client.commands.set(command.data.name, command);
     }
 }
@@ -352,9 +390,17 @@ const BOT_TOKEN = process.env.TOKEN || process.env.DISCORD_TOKEN || process.env.
 // Función para registrar comandos
 async function deployCommands() {
     try {
-        const body = client.debugMode ? [] : commands;
-        const countText = client.debugMode ? '0 (modo debug activo)' : `${commands.length}`;
+        const body = client.debugMode
+            ? commandData.filter(cmd => client.debugAllowedCommands.has(cmd.name))
+            : commandData;
+        const countText = client.debugMode
+            ? `${body.length} (modo debug activo)`
+            : `${commandData.length}`;
         console.log(`Iniciando el registro de ${countText} comandos.`);
+
+        if (client.debugMode && body.length === 0) {
+            console.warn('Modo debug activo pero no se encontraron comandos permitidos.');
+        }
 
         const rest = new REST().setToken(BOT_TOKEN);
         // Determinar applicationId y guildId (priorizar env, luego settings, luego client)
