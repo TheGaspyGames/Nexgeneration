@@ -1,13 +1,14 @@
 const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
+const config = require('../../config/config.js');
 const { Suggestion, isMongoConnected } = require('../models/Suggestion');
 
 module.exports = {
     data: new SlashCommandBuilder()
-        .setName('rechsugerencia')
-        .setDescription('Rechazar una sugerencia con motivo')
+        .setName('rechstaffsugerencia')
+        .setDescription('Rechaza una sugerencia privada del staff con motivo')
         .addIntegerOption(opt => opt.setName('id').setDescription('ID de la sugerencia').setRequired(true))
         .addStringOption(opt => opt.setName('razon').setDescription('Razón del rechazo').setRequired(true))
-        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+        .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
 
     async execute(interaction) {
         const id = interaction.options.getInteger('id');
@@ -19,23 +20,18 @@ module.exports = {
 
         let sugg;
         try {
-            sugg = await Suggestion.findOne({
-                id,
-                $or: [
-                    { scope: { $exists: false } },
-                    { scope: 'public' }
-                ]
-            }).exec();
+            sugg = await Suggestion.findOne({ id, scope: 'staff' }).exec();
         } catch (error) {
-            console.error('Error consultando sugerencia en MongoDB:', error);
-            return interaction.reply({ content: '❌ No se pudo consultar la base de datos de sugerencias. Inténtalo nuevamente más tarde.', ephemeral: true });
+            console.error('Error consultando sugerencia del staff en MongoDB:', error);
+            return interaction.reply({ content: '❌ No se pudo consultar la base de datos de sugerencias del staff. Inténtalo nuevamente más tarde.', ephemeral: true });
         }
 
-        if (!sugg) return interaction.reply({ content: `No se encontró la sugerencia con ID ${id}.`, ephemeral: true });
+        if (!sugg) return interaction.reply({ content: `No se encontró la sugerencia del staff con ID ${id}.`, ephemeral: true });
         try {
+            const staffGuildId = config.staffSuggestionsGuildId;
             const channel = await interaction.client.resolveChannel(sugg.channelId);
-            if (!channel || channel.guildId !== interaction.guildId) {
-                return interaction.reply({ content: 'No se encontró el canal de la sugerencia.', ephemeral: true });
+            if (!channel || (staffGuildId && channel.guildId !== staffGuildId)) {
+                return interaction.reply({ content: 'No se encontró el canal privado de la sugerencia.', ephemeral: true });
             }
             const message = await channel.messages.fetch(sugg.messageId).catch(() => null);
             if (!message) return interaction.reply({ content: 'No se encontró el mensaje de la sugerencia.', ephemeral: true });
@@ -45,15 +41,12 @@ module.exports = {
             sugg.status = 'Denegada';
             sugg.reason = razon;
 
-            // Color rojo para denegada
             try { embed.setColor('#E74C3C'); } catch (e) { /* ignore */ }
 
-            // Asegurar que la imagen del autor esté como thumbnail
             if (sugg.authorAvatar) {
                 try { embed.setThumbnail(sugg.authorAvatar); } catch (e) { /* ignore */ }
             }
 
-            // Actualizar campos
             const updatedFields = embed.data.fields.map(f => {
                 if (f.name === 'Estado') {
                     return { name: 'Estado', value: '❌ Denegada', inline: true };
@@ -69,18 +62,16 @@ module.exports = {
                 return f;
             }).filter(f => f.name !== 'Razón');
 
-            // Añadir razón al final
             updatedFields.push({ name: 'Razón', value: razon, inline: false });
             embed.data.fields = updatedFields;
 
-            // Guardar cambios en MongoDB
-            try { await sugg.save(); } catch (e) { console.error('No se pudo guardar sugerencia en MongoDB', e); }
+            try { await sugg.save(); } catch (e) { console.error('No se pudo guardar la sugerencia del staff en MongoDB', e); }
 
             await message.edit({ embeds: [EmbedBuilder.from(embed)] });
-            await interaction.reply({ content: `✅ Sugerencia ${id} rechazada. Razón: ${razon}`, ephemeral: true });
+            await interaction.reply({ content: `✅ Sugerencia del staff ${id} rechazada. Razón: ${razon}`, ephemeral: true });
         } catch (e) {
-            console.error('Error al rechazar sugerencia:', e);
-            return interaction.reply({ content: 'Ocurrió un error al rechazar la sugerencia.', ephemeral: true });
+            console.error('Error al rechazar la sugerencia del staff:', e);
+            return interaction.reply({ content: 'Ocurrió un error al rechazar la sugerencia del staff.', ephemeral: true });
         }
     }
 };
