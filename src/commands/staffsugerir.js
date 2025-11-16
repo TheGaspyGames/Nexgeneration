@@ -16,6 +16,13 @@ module.exports = {
     allowedGuilds: staffGuildId ? [staffGuildId] : [],
 
     async execute(interaction) {
+        if (!staffGuildId || interaction.guildId !== staffGuildId) {
+            return interaction.reply({
+                content: '⚠️ Este comando solo está disponible dentro del servidor privado del staff.',
+                ephemeral: true
+            });
+        }
+
         const suggestion = interaction.options.getString('sugerencia');
         const channelId = config.staffSuggestionsChannel;
         const channel = await interaction.client.resolveChannel(channelId);

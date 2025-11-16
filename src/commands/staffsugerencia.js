@@ -19,6 +19,13 @@ module.exports = {
     allowedGuilds: staffGuildId ? [staffGuildId] : [],
 
     async execute(interaction) {
+        if (!staffGuildId || interaction.guildId !== staffGuildId) {
+            return interaction.reply({
+                content: '⚠️ Este comando solo está disponible dentro del servidor privado del staff.',
+                ephemeral: true
+            });
+        }
+
         const id = interaction.options.getInteger('id');
         const accion = interaction.options.getString('accion');
 
