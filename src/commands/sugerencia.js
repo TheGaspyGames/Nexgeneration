@@ -1,6 +1,4 @@
 const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
-const fs = require('fs');
-const path = require('path');
 const { Suggestion, isMongoConnected } = require('../models/Suggestion');
 
 module.exports = {
@@ -34,8 +32,10 @@ module.exports = {
 
         if (!sugg) return interaction.reply({ content: `No se encontró la sugerencia con ID ${id}.`, ephemeral: true });
         try {
-            const channel = await interaction.guild.channels.fetch(sugg.channelId).catch(() => null);
-            if (!channel) return interaction.reply({ content: 'No se encontró el canal de la sugerencia.', ephemeral: true });
+            const channel = await interaction.client.resolveChannel(sugg.channelId);
+            if (!channel || channel.guildId !== interaction.guildId) {
+                return interaction.reply({ content: 'No se encontró el canal de la sugerencia.', ephemeral: true });
+            }
             const message = await channel.messages.fetch(sugg.messageId).catch(() => null);
             if (!message) return interaction.reply({ content: 'No se encontró el mensaje de la sugerencia.', ephemeral: true });
 
