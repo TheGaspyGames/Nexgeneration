@@ -4,8 +4,45 @@ const ms = require('ms');
 class GiveawayManager {
     constructor(client) {
         this.client = client;
-            this.giveaways = new Map();
-            this.messageCount = new Map(); // Para rastrear los mensajes de los usuarios
+        this.giveaways = new Map();
+        this.messageCount = new Map(); // Para rastrear los mensajes de los usuarios
+        this.expirationWatcher = null;
+        this.startExpirationWatcher();
+    }
+
+    startExpirationWatcher() {
+        if (this.expirationWatcher) return;
+
+        this.expirationWatcher = setInterval(() => {
+            this.sweepExpiredGiveaways();
+        }, 5 * 1000); // Revisa cada 5 segundos para finalizar sorteos apenas expiren
+    }
+
+    stopExpirationWatcherIfIdle() {
+        if (!this.expirationWatcher) return;
+
+        const hasActiveGiveaways = Array.from(this.giveaways.values()).some(giveaway => !giveaway.ended);
+        if (!hasActiveGiveaways) {
+            clearInterval(this.expirationWatcher);
+            this.expirationWatcher = null;
+        }
+    }
+
+    sweepExpiredGiveaways() {
+        if (!this.giveaways.size) {
+            this.stopExpirationWatcherIfIdle();
+            return;
+        }
+
+        const now = Date.now();
+        for (const [messageId, giveaway] of this.giveaways.entries()) {
+            if (giveaway.ended) continue;
+            if (giveaway.endTime <= now) {
+                this.endGiveaway(messageId).catch(error => {
+                    console.error('Error al finalizar un sorteo expirado:', error);
+                });
+            }
+        }
     }
 
     async createGiveaway(options) {
@@ -77,6 +114,7 @@ class GiveawayManager {
 
         this.giveaways.set(giveawayMessage.id, giveaway);
         this.setTimer(giveawayMessage.id);
+        this.startExpirationWatcher();
 
         return giveaway;
     }
@@ -126,15 +164,26 @@ class GiveawayManager {
 
         giveaway.ended = true;
         this.giveaways.set(messageId, giveaway);
+        this.stopExpirationWatcherIfIdle();
     }
 
     setTimer(messageId) {
         const giveaway = this.giveaways.get(messageId);
         if (!giveaway) return;
 
+        const delay = Math.max(0, giveaway.endTime - Date.now());
+        if (delay === 0) {
+            this.endGiveaway(messageId).catch(error => {
+                console.error('Error al finalizar un sorteo al instante:', error);
+            });
+            return;
+        }
+
         setTimeout(() => {
-            this.endGiveaway(messageId);
-        }, giveaway.endTime - Date.now());
+            this.endGiveaway(messageId).catch(error => {
+                console.error('Error al finalizar un sorteo programado:', error);
+            });
+        }, delay);
     }
 
     async handleJoin(interaction) {
