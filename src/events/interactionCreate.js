@@ -1,6 +1,7 @@
 const { Events, ActionRowBuilder, ButtonBuilder } = require('discord.js');
 const config = require('../../config/config.js');
 const settings = require('../../config/settings.json');
+const automodCache = require('../utils/automodCache');
 
 module.exports = {
     name: Events.InteractionCreate,
@@ -157,6 +158,9 @@ function removeBannedWords(words) {
             config.autoModeration.bannedWords.splice(i, 1);
             removed++;
         }
+    }
+    if (removed > 0 && typeof automodCache.invalidate === 'function') {
+        automodCache.invalidate();
     }
     return removed;
 }

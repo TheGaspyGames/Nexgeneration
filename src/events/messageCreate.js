@@ -1,5 +1,20 @@
 const { Events, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const config = require('../../config/config.js');
+const automodCache = require('../utils/automodCache');
+
+const IP_TRIGGER_PHRASES = [
+    'ip',
+    'ip del server',
+    'ip del servidor',
+    'ip server',
+    'ip servidor',
+    'cual es la ip',
+    'cual es la ip del server',
+    'cual es la ip del servidor',
+    'cual es la ip server'
+];
+const IP_TRIGGER_SET = new Set(IP_TRIGGER_PHRASES);
+const IP_RESPONSE_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutos
 
 const IP_TRIGGER_PHRASES = [
     'ip',
@@ -28,8 +43,11 @@ module.exports = {
             giveawayManager.messageCount.set(message.author.id, previousCount + 1);
         }
 
-        if (message.content && message.content.toLowerCase().includes('ip')) {
-            const normalizedContent = normalizeContentForIp(message.content);
+        const rawContent = message.content || '';
+        const loweredContent = rawContent.toLowerCase();
+
+        if (loweredContent.includes('ip')) {
+            const normalizedContent = normalizeContentForIp(rawContent);
             if (normalizedContent && IP_TRIGGER_SET.has(normalizedContent)) {
                 if (!message.client.ipResponseCooldowns) {
                     message.client.ipResponseCooldowns = new Map();
@@ -73,15 +91,18 @@ module.exports = {
             return;
         }
 
-            // Si AI flagging está activado, ejecutar un análisis real (OpenAI si hay API key, sino fallback de palabras)
-        if (config.autoModeration.aiFlagging) {
-            try {
-                const result = await analyzeMessageForFlagging(message.content, message.client);
-                if (result && result.flagged) {
-                    // No sancionamos, solo logueamos internamente en el canal configurado para mod logs
-                    const modChannelId = (message.client && message.client.settings && message.client.settings.modLogChannel) || null;
+        // Si AI flagging está activado, ejecutar la verificación en segundo plano
+        if (config.autoModeration.aiFlagging && typeof message.client.runInBackground === 'function') {
+            message.client.runInBackground(async () => {
+                try {
+                    const result = await analyzeMessageForFlagging(rawContent, message.client);
+                    if (!result || !result.flagged) {
+                        return;
+                    }
+
+                    const modChannelId = message.client?.settings?.modLogChannel || null;
                     const details = result.detail || '';
-                    const embedDesc = `Usuario: ${message.author.tag} (${message.author.id})\nGuild: ${message.guild ? message.guild.name : 'DM'}\nCanal: ${message.channel.id}\n\nContenido:\n${message.content.slice(0, 1900)}\n\nDetalle: ${typeof details === 'string' ? details : JSON.stringify(details).slice(0,1900)}`;
+                    const embedDesc = `Usuario: ${message.author.tag} (${message.author.id})\nGuild: ${message.guild ? message.guild.name : 'DM'}\nCanal: ${message.channel.id}\n\nContenido:\n${rawContent.slice(0, 1900)}\n\nDetalle: ${typeof details === 'string' ? details : JSON.stringify(details).slice(0, 1900)}`;
 
                     if (modChannelId) {
                         try {
@@ -93,21 +114,18 @@ module.exports = {
                                     .setColor('#FF0000')
                                     .setTimestamp();
                                 await ch.send({ embeds: [embed] }).catch(() => null);
-                            } else {
-                                // fallback: usar client.log (global logs)
-                                await message.client.log('AutoMod - AI Flag', `Mensaje marcado`, embedDesc, { id: message.author.id, tag: message.author.tag });
+                                return;
                             }
                         } catch (e) {
                             console.error('Error enviando mod log:', e.message);
                         }
-                    } else {
-                        // Si no hay mod channel configurado, usar client.log
-                        await message.client.log('AutoMod - AI Flag', `Mensaje marcado en ${message.guild ? message.guild.name : 'DM'}`, embedDesc, { id: message.author.id, tag: message.author.tag });
                     }
+
+                    await message.client.log('AutoMod - AI Flag', `Mensaje marcado en ${message.guild ? message.guild.name : 'DM'}`, embedDesc, { id: message.author.id, tag: message.author.tag });
+                } catch (e) {
+                    console.error('Error en AI flagging:', e.message);
                 }
-            } catch (e) {
-                console.error('Error en AI flagging:', e.message);
-            }
+            });
         }
 
         // Verificar menciones excesivas
@@ -121,10 +139,7 @@ module.exports = {
         }
 
         // Verificar palabras prohibidas
-        const loweredContent = message.content.toLowerCase();
-        const matchedBannedWords = config.autoModeration.bannedWords.filter(word =>
-            loweredContent.includes(word.toLowerCase())
-        );
+        const matchedBannedWords = [...new Set(automodCache.getMatches(loweredContent))];
 
         if (matchedBannedWords.length) {
             await message.delete();
@@ -132,7 +147,7 @@ module.exports = {
                 content: `⚠️ ${message.author}, tu mensaje contiene palabras prohibidas.`
             }).then(msg => setTimeout(() => msg.delete(), 5000));
 
-            const highlightedMessage = highlightBannedWords(message.content, matchedBannedWords);
+            const highlightedMessage = automodCache.highlight(rawContent);
             const displayName = (message.member && message.member.displayName) || message.author.tag;
             const reportChannelId = config.autoModeration.reportChannelId;
             const reviewChannelId = config.autoModeration.reviewChannelId;
@@ -191,7 +206,7 @@ module.exports = {
         }
 
         // Verificar número de líneas
-        const lines = message.content.split('\n').length;
+        const lines = rawContent.split('\n').length;
         if (lines > config.autoModeration.maxLines) {
             await message.delete();
             await message.channel.send({
@@ -201,30 +216,6 @@ module.exports = {
         }
     },
 };
-
-function highlightBannedWords(messageContent, bannedWords) {
-    if (!messageContent) return '*Sin contenido*';
-
-    const uniqueWords = [...new Set(
-        (bannedWords || [])
-            .map(word => (typeof word === 'string' ? word.trim() : ''))
-            .filter(Boolean)
-    )];
-
-    if (!uniqueWords.length) return messageContent;
-
-    // Sort by length so longer phrases ("hijo de puta") are highlighted before their substrings.
-    uniqueWords.sort((a, b) => b.length - a.length);
-
-    const escapedAlternatives = uniqueWords
-        .map(word => word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
-        .join('|');
-
-    if (!escapedAlternatives) return messageContent;
-
-    const regex = new RegExp(`(${escapedAlternatives})`, 'gi');
-    return messageContent.replace(regex, '**$1**');
-}
 
 function createAutomodEmbed(message, displayName, highlightedMessage) {
     const embed = new EmbedBuilder()

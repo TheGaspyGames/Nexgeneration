@@ -3,25 +3,18 @@ const fs = require('fs');
 const path = require('path');
 require('dotenv').config();
 const config = require('./config/config.js');
+const { TimedCache, BackgroundQueue } = require('./src/utils/performance');
 
 const CHANNEL_CACHE_TTL_MS = 10 * 60 * 1000;
-const channelCache = new Map();
+const GUILD_CACHE_TTL_MS = 15 * 60 * 1000;
+const INVITE_CACHE_TTL_MS = 30 * 1000;
 
-const getCachedChannel = (channelId) => {
-    const entry = channelCache.get(channelId);
-    if (!entry) return null;
-    if (entry.expiresAt > Date.now()) {
-        return entry.channel;
-    }
-    channelCache.delete(channelId);
-    return null;
-};
+const normalizeId = (value) => (value ? value.toString() : null);
 
-const cacheChannel = (channelId, channel, ttl = CHANNEL_CACHE_TTL_MS) => {
-    if (!channelId || !channel) return channel;
-    channelCache.set(channelId, { channel, expiresAt: Date.now() + ttl });
-    return channel;
-};
+const channelCache = new TimedCache(CHANNEL_CACHE_TTL_MS);
+const guildCache = new TimedCache(GUILD_CACHE_TTL_MS);
+const inviteCache = new TimedCache(INVITE_CACHE_TTL_MS);
+const backgroundQueue = new BackgroundQueue();
 
 const client = new Client({
     intents: [
@@ -38,54 +31,134 @@ const client = new Client({
     ]
 });
 
+client.performance = {
+    channelCache,
+    guildCache,
+    inviteCache,
+    backgroundQueue,
+};
+
+client.runInBackground = function (task) {
+    backgroundQueue.run(task);
+};
+
 client.settings = { suggestionsChannel: null };
 
 client.invalidateChannelCache = (channelId) => {
-    const key = channelId ? channelId.toString() : null;
+    const key = normalizeId(channelId);
     if (!key) return;
     channelCache.delete(key);
 };
 
+client.invalidateGuildCache = (guildId) => {
+    const key = normalizeId(guildId);
+    if (!key) return;
+    guildCache.delete(key);
+};
+
+client.invalidateInviteCache = (guildId) => {
+    const key = normalizeId(guildId);
+    if (!key) return;
+    inviteCache.delete(key);
+};
+
 client.resolveChannel = async function (channelId, options = {}) {
-    if (!channelId) return null;
-    const normalizedId = channelId.toString();
+    const normalizedId = normalizeId(channelId);
+    if (!normalizedId) return null;
     const { force = false, ttl = CHANNEL_CACHE_TTL_MS } = options;
 
     if (!force) {
-        const cached = getCachedChannel(normalizedId);
+        const cached = channelCache.get(normalizedId);
         if (cached) return cached;
 
         const collectionChannel = client.channels.cache.get(normalizedId);
         if (collectionChannel) {
-            return cacheChannel(normalizedId, collectionChannel, ttl);
+            return channelCache.set(normalizedId, collectionChannel, ttl);
         }
     } else {
-        client.invalidateChannelCache(normalizedId);
+        channelCache.delete(normalizedId);
     }
 
     try {
         const fetched = await client.channels.fetch(normalizedId);
         if (fetched) {
-            cacheChannel(normalizedId, fetched, ttl);
+            channelCache.set(normalizedId, fetched, ttl);
         }
         return fetched ?? null;
     } catch (error) {
-        client.invalidateChannelCache(normalizedId);
+        channelCache.delete(normalizedId);
         return null;
     }
 };
 
-client.resolveGuild = async function (guildId) {
-    if (!guildId) return null;
-    const normalizedId = guildId.toString();
-    const cached = client.guilds.cache.get(normalizedId);
-    if (cached) return cached;
+client.resolveGuild = async function (guildId, options = {}) {
+    const normalizedId = normalizeId(guildId);
+    if (!normalizedId) return null;
+    const { force = false, ttl = GUILD_CACHE_TTL_MS } = options;
+
+    if (!force) {
+        const cached = guildCache.get(normalizedId) || client.guilds.cache.get(normalizedId);
+        if (cached) {
+            guildCache.set(normalizedId, cached, ttl);
+            return cached;
+        }
+    } else {
+        guildCache.delete(normalizedId);
+    }
 
     try {
-        return await client.guilds.fetch(normalizedId);
+        const fetched = await client.guilds.fetch(normalizedId);
+        if (fetched) {
+            guildCache.set(normalizedId, fetched, ttl);
+        }
+        return fetched ?? null;
     } catch (error) {
+        guildCache.delete(normalizedId);
         return null;
     }
+};
+
+client.getInviteUsageSummary = async function (guildLike, options = {}) {
+    const normalizedGuildId = typeof guildLike === 'string'
+        ? normalizeId(guildLike)
+        : normalizeId(guildLike?.id);
+    if (!normalizedGuildId) return new Map();
+
+    const { force = false, ttl = INVITE_CACHE_TTL_MS } = options;
+
+    if (!force) {
+        const cached = inviteCache.get(normalizedGuildId);
+        if (cached) return cached;
+    } else {
+        inviteCache.delete(normalizedGuildId);
+    }
+
+    const guild = typeof guildLike === 'string'
+        ? await client.resolveGuild(guildLike)
+        : guildLike;
+    if (!guild) return new Map();
+
+    try {
+        const invites = await guild.invites.fetch();
+        const summary = new Map();
+        invites.forEach(invite => {
+            const inviterId = invite?.inviter?.id;
+            if (!inviterId) return;
+            const uses = invite.uses || 0;
+            summary.set(inviterId, (summary.get(inviterId) || 0) + uses);
+        });
+        inviteCache.set(normalizedGuildId, summary, ttl);
+        return summary;
+    } catch (error) {
+        inviteCache.delete(normalizedGuildId);
+        throw error;
+    }
+};
+
+client.getInviteUses = async function (guildLike, userId, options = {}) {
+    if (!userId) return 0;
+    const summary = await client.getInviteUsageSummary(guildLike, options);
+    return summary.get(userId) || 0;
 };
 
 client.userCountStats = { nonBot: 0, lastSync: 0 };

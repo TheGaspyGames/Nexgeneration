@@ -3,6 +3,7 @@ const ms = require('ms');
 
 const PARTICIPANTS_FIELD = 'Participantes';
 const WATCHDOG_INTERVAL_MS = 5 * 1000;
+const INVITE_USAGE_TTL_MS = 60 * 1000;
 
 class GiveawayManager {
     constructor(client) {
@@ -251,12 +252,9 @@ class GiveawayManager {
             // Verificar invites requeridos si aplica
             if (giveaway.requiredInvites && giveaway.requiredInvites > 0) {
                 try {
-                    const invites = await interaction.guild.invites.fetch();
-                    const userInvites = invites.filter(i => i.inviter && i.inviter.id === interaction.user.id);
-                    let uses = 0;
-                    for (const inv of userInvites.values()) {
-                        uses += inv.uses || 0;
-                    }
+                    const uses = await this.client.getInviteUses(interaction.guild, interaction.user.id, {
+                        ttl: INVITE_USAGE_TTL_MS
+                    });
                     if (uses < giveaway.requiredInvites) {
                         return interaction.reply({
                             content: `❌ Necesitas al menos ${giveaway.requiredInvites} invite(s) (usos) para participar. Actualmente tienes ${uses}.`,
