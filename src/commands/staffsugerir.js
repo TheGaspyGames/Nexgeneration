@@ -1,62 +1,64 @@
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
 const config = require('../../config/config.js');
-const fs = require('fs');
-const path = require('path');
 const { Suggestion, getNextSequence, isMongoConnected } = require('../models/Suggestion');
+
+const staffGuildId = config.staffSuggestionsGuildId;
 
 module.exports = {
     data: new SlashCommandBuilder()
-        .setName('sugerir')
-        .setDescription('Envía una sugerencia para el servidor')
+        .setName('staffsugerir')
+        .setDescription('Envía una sugerencia privada para el staff')
         .addStringOption(option =>
             option.setName('sugerencia')
-                .setDescription('Tu sugerencia para el servidor')
-                .setRequired(true)),
+                .setDescription('Tu sugerencia para el staff')
+                .setRequired(true))
+        .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
+    allowedGuilds: staffGuildId ? [staffGuildId] : [],
 
     async execute(interaction) {
-        const suggestion = interaction.options.getString('sugerencia');
-
-    // Leer settings persistente si existe
-    const settingsPath = path.join(__dirname, '..', '..', 'config', 'settings.json');
-    let settings = {};
-    try { settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8')); } catch (e) { /* ignore */ }
-
-    const channelId = settings.suggestionsChannel || config.suggestionsChannel;
-    const channel = interaction.guild.channels.cache.get(channelId);
-
-        if (!channel) {
+        if (!staffGuildId || interaction.guildId !== staffGuildId) {
             return interaction.reply({
-                content: '❌ El canal de sugerencias no está configurado. Un administrador debe ejecutar `/setsugch` para configurarlo.',
+                content: '⚠️ Este comando solo está disponible dentro del servidor privado del staff.',
                 ephemeral: true
             });
         }
 
-        // Obtener next id desde Mongo (o fallback a file si no está disponible)
+        const suggestion = interaction.options.getString('sugerencia');
+        const channelId = config.staffSuggestionsChannel;
+        const channel = await interaction.client.resolveChannel(channelId);
+
+        if (!channel || (staffGuildId && channel.guildId !== staffGuildId)) {
+            return interaction.reply({
+                content: '❌ El canal privado de sugerencias para el staff no está disponible.',
+                ephemeral: true
+            });
+        }
+
         let id;
         try {
             if (isMongoConnected()) {
                 id = await getNextSequence('suggestionId');
             }
         } catch (err) {
-            console.error('Error obteniendo next sequence, usando fallback file:', err.message);
+            console.error('Error obteniendo next sequence para sugerencias staff:', err.message);
         }
         if (!id) {
-            // fallback simple: usar timestamp
             id = Date.now();
         }
+
         const embed = new EmbedBuilder()
-            .setTitle('⭐ ¡Nueva sugerencia! ⭐')
+            .setTitle('🛡️ Nueva sugerencia para el staff')
             .addFields(
                 { name: 'ID sug:', value: `${id}`, inline: true },
                 { name: 'Fecha:', value: `<t:${Math.floor(Date.now()/1000)}:R>`, inline: true },
                 { name: 'Autor:', value: interaction.user.tag, inline: true },
-                { name: '\u200B', value: '\u200B' }, // Espaciador
+                { name: '\u200B', value: '\u200B' },
                 { name: 'Sug:', value: suggestion },
-                { name: '\u200B', value: '\u200B' }, // Espaciador
+                { name: '\u200B', value: '\u200B' },
                 { name: 'Estado', value: '⏳ Pendiente', inline: true },
                 { name: 'Votos', value: '👍 0 | 👎 1', inline: true }
             )
-            .setColor('#3498db')
+            .setColor('#9b59b6')
             .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true, size: 1024 }))
             .setTimestamp();
 
@@ -64,19 +66,18 @@ module.exports = {
         await message.react('👍');
         await message.react('👎');
 
-        // Guardar sugerencia en MongoDB si está disponible
         let savedInDb = false;
         try {
             if (Suggestion && isMongoConnected()) {
                 const doc = new Suggestion({
                     id: id,
+                    scope: 'staff',
                     authorId: interaction.user.id,
                     authorTag: interaction.user.tag,
                     authorAvatar: interaction.user.displayAvatarURL({ dynamic: true, size: 1024 }),
                     messageId: message.id,
                     channelId: channel.id,
                     content: suggestion,
-                    scope: 'public',
                     status: 'Pendiente',
                     approvals: 0
                 });
@@ -84,10 +85,10 @@ module.exports = {
                 savedInDb = true;
             }
         } catch (e) {
-            console.error('No se pudo guardar sugerencia en MongoDB:', e);
+            console.error('No se pudo guardar la sugerencia del staff en MongoDB:', e);
         }
 
-        let replyMessage = `✅ Tu sugerencia ha sido enviada al canal ${channel}`;
+        let replyMessage = `✅ Tu sugerencia para el staff ha sido enviada al canal <#${channelId}>`;
         if (!savedInDb) {
             replyMessage += '\n⚠️ No se pudo guardar en la base de datos, pero la sugerencia seguirá visible en el canal.';
         }

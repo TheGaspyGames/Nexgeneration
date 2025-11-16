@@ -29,10 +29,22 @@ module.exports = {
             if (!command) return;
 
             // Verificar si estamos en el servidor permitido
-            if (settings.guildId && interaction.guildId !== settings.guildId) {
+            const allowedGuilds = Array.isArray(command.allowedGuilds)
+                ? command.allowedGuilds.map(id => id && id.toString()).filter(Boolean)
+                : [];
+
+            if (allowedGuilds.length > 0) {
+                if (!interaction.guildId || !allowedGuilds.includes(interaction.guildId)) {
+                    await interaction.reply({
+                        content: '⚠️ Este comando no está disponible en este servidor.',
+                        ephemeral: true
+                    });
+                    return;
+                }
+            } else if (settings.guildId && interaction.guildId !== settings.guildId) {
                 await interaction.reply({
                     content: '⚠️ Este bot solo está configurado para funcionar en un servidor específico.',
-                    ephemeral: true 
+                    ephemeral: true
                 });
                 return;
             }
