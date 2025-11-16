@@ -68,6 +68,7 @@ class GiveawayManager {
             host,
             minMessages = 0,
             requiredRole = null,
+            excludedRole = null,
             requiredInvites = 0
         } = options;
 
@@ -81,12 +82,18 @@ class GiveawayManager {
 
         const endTime = Date.now() + durationMs;
 
+        const requirements = [];
+        if (minMessages > 0) requirements.push(`Mensajes mínimos: ${minMessages}`);
+        if (requiredRole) requirements.push(`Rol requerido: <@&${requiredRole}>`);
+        if (excludedRole) requirements.push(`Rol bloqueado: <@&${excludedRole}>`);
+        if (!requirements.length) requirements.push('Ninguno');
+
         const embed = new EmbedBuilder()
             .setTitle('🎉 SORTEO')
             .setDescription(`**Premio:** ${prize}\n**Ganadores:** ${winners}\n**Host:** ${host.tag}\n**Termina:** <t:${Math.floor(endTime / 1000)}:R>\n\nReacciona con 🎉 para participar!`)
             .setColor('#FF5733')
             .setFooter({ text: `Termina el ${new Date(endTime).toLocaleString()}` })
-            .addFields({ name: 'Requisitos', value: `${minMessages > 0 ? `Mensajes mínimos: ${minMessages}\n` : ''}${requiredRole ? `Rol requerido: <@&${requiredRole}>` : 'Ninguno'}` });
+            .addFields({ name: 'Requisitos', value: requirements.join('\n') });
         if (requiredInvites && requiredInvites > 0) {
             embed.addFields({ name: 'Invites requeridos', value: `${requiredInvites} invite(s)`, inline: false });
         }
@@ -120,6 +127,7 @@ class GiveawayManager {
             endTime,
             minMessages,
             requiredRole,
+            excludedRole,
             requiredInvites,
             participants: new Set(),
             ended: false,
@@ -151,12 +159,18 @@ class GiveawayManager {
 
         const winnerMentions = winners.map(id => `<@${id}>`).join(', ') || 'Nadie participó';
 
+        const endRequirements = [];
+        if (giveaway.minMessages && giveaway.minMessages > 0) endRequirements.push(`Mensajes mínimos: ${giveaway.minMessages}`);
+        if (giveaway.requiredRole) endRequirements.push(`Rol requerido: <@&${giveaway.requiredRole}>`);
+        if (giveaway.excludedRole) endRequirements.push(`Rol bloqueado: <@&${giveaway.excludedRole}>`);
+        if (!endRequirements.length) endRequirements.push('Ninguno');
+
         const embed = new EmbedBuilder()
             .setTitle('🎉 SORTEO TERMINADO')
             .setDescription(`**Premio:** ${giveaway.prize}\n**Ganadores:** ${winnerMentions}\n**Host:** <@${giveaway.host}>`)
             .setColor('#FF5733')
             .setFooter({ text: 'Sorteo finalizado' })
-            .addFields({ name: 'Requisitos', value: `${giveaway.minMessages && giveaway.minMessages > 0 ? `Mensajes mínimos: ${giveaway.minMessages}\n` : ''}${giveaway.requiredRole ? `Rol requerido: <@&${giveaway.requiredRole}>` : 'Ninguno'}` });
+            .addFields({ name: 'Requisitos', value: endRequirements.join('\n') });
             if (giveaway.requiredInvites && giveaway.requiredInvites > 0) {
                 embed.addFields({ name: 'Invites requeridos', value: `${giveaway.requiredInvites} invite(s)`, inline: false });
             }
@@ -233,20 +247,29 @@ class GiveawayManager {
                 }
             }
 
-            // Verificar rol requerido si aplica
-            if (giveaway.requiredRole) {
+            // Verificar rol requerido o bloqueado si aplica
+            let member = null;
+            if (giveaway.requiredRole || giveaway.excludedRole) {
                 try {
-                    const member = await interaction.guild.members.fetch(interaction.user.id);
-                    if (!member.roles.cache.has(giveaway.requiredRole)) {
-                        return interaction.reply({
-                            content: `❌ Necesitas el rol <@&${giveaway.requiredRole}> para participar en este sorteo.`,
-                            ephemeral: true
-                        });
-                    }
+                    member = await interaction.guild.members.fetch(interaction.user.id);
                 } catch (e) {
-                    console.error('Error verificando rol requerido:', e.message);
+                    console.error('Error obteniendo el miembro para verificar roles:', e.message);
                     return interaction.reply({ content: '❌ Error al verificar tus roles. Intenta de nuevo.', ephemeral: true });
                 }
+            }
+
+            if (giveaway.requiredRole && member && !member.roles.cache.has(giveaway.requiredRole)) {
+                return interaction.reply({
+                    content: `❌ Necesitas el rol <@&${giveaway.requiredRole}> para participar en este sorteo.`,
+                    ephemeral: true
+                });
+            }
+
+            if (giveaway.excludedRole && member && member.roles.cache.has(giveaway.excludedRole)) {
+                return interaction.reply({
+                    content: `❌ El rol <@&${giveaway.excludedRole}> no puede participar en este sorteo.`,
+                    ephemeral: true
+                });
             }
 
             // Verificar invites requeridos si aplica
