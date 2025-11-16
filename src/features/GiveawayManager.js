@@ -1,6 +1,9 @@
 const { EmbedBuilder, ButtonBuilder, ButtonStyle, ActionRowBuilder } = require('discord.js');
 const ms = require('ms');
 
+const PARTICIPANTS_FIELD = 'Participantes';
+const WATCHDOG_INTERVAL_MS = 5 * 1000;
+
 class GiveawayManager {
     constructor(client) {
         this.client = client;
@@ -15,7 +18,10 @@ class GiveawayManager {
 
         this.expirationWatcher = setInterval(() => {
             this.sweepExpiredGiveaways();
-        }, 5 * 1000); // Revisa cada 5 segundos para finalizar sorteos apenas expiren
+        }, WATCHDOG_INTERVAL_MS); // Revisa cada 5 segundos para finalizar sorteos apenas expiren
+        if (typeof this.expirationWatcher.unref === 'function') {
+            this.expirationWatcher.unref();
+        }
     }
 
     stopExpirationWatcherIfIdle() {
@@ -35,13 +41,20 @@ class GiveawayManager {
         }
 
         const now = Date.now();
+        const pendingClosures = [];
         for (const [messageId, giveaway] of this.giveaways.entries()) {
-            if (giveaway.ended) continue;
-            if (giveaway.endTime <= now) {
+            if (giveaway.ended || giveaway.endTime > now) continue;
+            pendingClosures.push(
                 this.endGiveaway(messageId).catch(error => {
                     console.error('Error al finalizar un sorteo expirado:', error);
-                });
-            }
+                })
+            );
+        }
+
+        if (pendingClosures.length) {
+            Promise.allSettled(pendingClosures).catch(error => {
+                console.error('Error al barrer sorteos expirados:', error);
+            });
         }
     }
 
@@ -52,13 +65,12 @@ class GiveawayManager {
             winners,
             prize,
             host,
-                message,
-                minMessages = 0,
-                requiredRole = null,
-                requiredInvites = 0
+            minMessages = 0,
+            requiredRole = null,
+            requiredInvites = 0
         } = options;
 
-        const channel = await this.client.channels.fetch(channelId);
+        const channel = await this.client.resolveChannel(channelId);
         if (!channel) return null;
 
         const durationMs = ms(duration);
@@ -70,7 +82,7 @@ class GiveawayManager {
 
         const embed = new EmbedBuilder()
             .setTitle('🎉 SORTEO')
-                .setDescription(`**Premio:** ${prize}\n**Ganadores:** ${winners}\n**Host:** ${host.tag}\n**Termina:** <t:${Math.floor(endTime / 1000)}:R>\n\nReacciona con 🎉 para participar!`)
+            .setDescription(`**Premio:** ${prize}\n**Ganadores:** ${winners}\n**Host:** ${host.tag}\n**Termina:** <t:${Math.floor(endTime / 1000)}:R>\n\nReacciona con 🎉 para participar!`)
             .setColor('#FF5733')
             .setFooter({ text: `Termina el ${new Date(endTime).toLocaleString()}` })
             .addFields({ name: 'Requisitos', value: `${minMessages > 0 ? `Mensajes mínimos: ${minMessages}\n` : ''}${requiredRole ? `Rol requerido: <@&${requiredRole}>` : 'Ninguno'}` });
@@ -105,11 +117,12 @@ class GiveawayManager {
             winners: Number(winners),
             host: host.id,
             endTime,
-                                minMessages,
-                            requiredRole,
-                        requiredInvites,
+            minMessages,
+            requiredRole,
+            requiredInvites,
             participants: new Set(),
-            ended: false
+            ended: false,
+            messageCache: giveawayMessage
         };
 
         this.giveaways.set(giveawayMessage.id, giveaway);
@@ -122,12 +135,9 @@ class GiveawayManager {
     async endGiveaway(messageId) {
         const giveaway = this.giveaways.get(messageId);
         if (!giveaway || giveaway.ended) return;
-
-        const channel = await this.client.channels.fetch(giveaway.channelId);
+        const message = await this.getOrFetchGiveawayMessage(giveaway);
+        const channel = message?.channel ?? await this.client.resolveChannel(giveaway.channelId);
         if (!channel) return;
-
-        const message = await channel.messages.fetch(messageId);
-        if (!message) return;
 
         const participants = Array.from(giveaway.participants);
         const winners = [];
@@ -150,10 +160,13 @@ class GiveawayManager {
                 embed.addFields({ name: 'Invites requeridos', value: `${giveaway.requiredInvites} invite(s)`, inline: false });
             }
 
-        await message.edit({
-            embeds: [embed],
-            components: []
-        });
+        if (message) {
+            await message.edit({
+                embeds: [embed],
+                components: []
+            });
+            giveaway.messageCache = message;
+        }
 
         if (winners.length > 0) {
             await channel.send({
@@ -163,6 +176,10 @@ class GiveawayManager {
         }
 
         giveaway.ended = true;
+        if (giveaway.timeoutId) {
+            clearTimeout(giveaway.timeoutId);
+            giveaway.timeoutId = null;
+        }
         this.giveaways.set(messageId, giveaway);
         this.stopExpirationWatcherIfIdle();
     }
@@ -170,6 +187,11 @@ class GiveawayManager {
     setTimer(messageId) {
         const giveaway = this.giveaways.get(messageId);
         if (!giveaway) return;
+
+        if (giveaway.timeoutId) {
+            clearTimeout(giveaway.timeoutId);
+            giveaway.timeoutId = null;
+        }
 
         const delay = Math.max(0, giveaway.endTime - Date.now());
         if (delay === 0) {
@@ -179,11 +201,15 @@ class GiveawayManager {
             return;
         }
 
-        setTimeout(() => {
+        giveaway.timeoutId = setTimeout(() => {
             this.endGiveaway(messageId).catch(error => {
                 console.error('Error al finalizar un sorteo programado:', error);
             });
         }, delay);
+        if (typeof giveaway.timeoutId.unref === 'function') {
+            giveaway.timeoutId.unref();
+        }
+        this.giveaways.set(messageId, giveaway);
     }
 
     async handleJoin(interaction) {
@@ -340,24 +366,19 @@ class GiveawayManager {
 
     async updateParticipantsField(message, giveaway) {
         try {
-            let targetMessage = message;
-            if (!targetMessage) {
-                const channel = await this.client.channels.fetch(giveaway.channelId);
-                if (!channel) return;
-                targetMessage = await channel.messages.fetch(giveaway.messageId);
-            }
+            const targetMessage = message ?? await this.getOrFetchGiveawayMessage(giveaway);
 
             if (!targetMessage || !targetMessage.embeds.length) return;
 
             const updatedEmbed = EmbedBuilder.from(targetMessage.embeds[0]);
             const fields = updatedEmbed.data.fields ? [...updatedEmbed.data.fields] : [];
-            const participantIndex = fields.findIndex(field => field.name === 'Participantes');
+            const participantIndex = fields.findIndex(field => field.name === PARTICIPANTS_FIELD);
             const participantValue = `${giveaway.participants.size}`;
 
             if (participantIndex !== -1) {
                 fields[participantIndex] = { ...fields[participantIndex], value: participantValue };
             } else {
-                fields.push({ name: 'Participantes', value: participantValue, inline: false });
+                fields.push({ name: PARTICIPANTS_FIELD, value: participantValue, inline: false });
             }
 
             updatedEmbed.setFields(fields);
@@ -366,8 +387,35 @@ class GiveawayManager {
                 embeds: [updatedEmbed],
                 components: targetMessage.components
             });
+
+            giveaway.messageCache = targetMessage;
+            this.giveaways.set(giveaway.messageId, giveaway);
         } catch (error) {
             console.error('Error actualizando el contador de participantes del sorteo:', error);
+        }
+    }
+
+    async getOrFetchGiveawayMessage(giveaway) {
+        if (!giveaway) return null;
+
+        if (
+            giveaway.messageCache &&
+            !giveaway.messageCache.partial &&
+            giveaway.messageCache.id === giveaway.messageId
+        ) {
+            return giveaway.messageCache;
+        }
+
+        try {
+            const channel = await this.client.resolveChannel(giveaway.channelId);
+            if (!channel) return null;
+            const message = await channel.messages.fetch(giveaway.messageId);
+            giveaway.messageCache = message;
+            this.giveaways.set(giveaway.messageId, giveaway);
+            return message;
+        } catch (error) {
+            console.error('No se pudo recuperar el mensaje del sorteo:', error);
+            return null;
         }
     }
 }
