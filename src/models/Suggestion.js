@@ -31,6 +31,7 @@ async function getNextSequence(name) {
 
 const SuggestionSchema = new mongoose.Schema({
   id: { type: Number, unique: true },
+  scope: { type: String, default: 'public', index: true },
   authorId: String,
   authorTag: String,
   authorAvatar: String,

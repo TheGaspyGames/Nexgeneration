@@ -3,6 +3,8 @@ module.exports = {
     giveawayEmoji: '🎉', // Emoji para los sorteos
     // Por defecto, suggestionsChannel se leerá desde settings.json (persistente)
     suggestionsChannel: 'ID_DEL_CANAL_DE_SUGERENCIAS', // Valor por defecto
+    staffSuggestionsChannel: '1439649094145544326',
+    staffSuggestionsGuildId: '1433154337227542792',
     // Logging: canal y servidor donde el bot enviará logs internos
     logs: {
         guildId: '1433154337227542792', // servidor donde van los logs
