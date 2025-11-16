@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
 const config = require('../../config/config.js');
 const { Suggestion, getNextSequence, isMongoConnected } = require('../models/Suggestion');
+const { rememberTabletSuggestion } = require('../utils/tabletSuggestions');
 
 const staffGuildId = config.staffSuggestionsGuildId;
 
@@ -89,9 +90,24 @@ module.exports = {
             console.error('No se pudo guardar la sugerencia del staff en MongoDB:', e);
         }
 
+        if (!savedInDb) {
+            rememberTabletSuggestion({
+                id,
+                scope: 'staff',
+                authorId: interaction.user.id,
+                authorTag: interaction.user.tag,
+                authorAvatar: interaction.user.displayAvatarURL({ dynamic: true, size: 1024 }),
+                messageId: message.id,
+                channelId: channel.id,
+                content: suggestion,
+                status: 'Pendiente',
+                approvals: 0,
+            });
+        }
+
         let replyMessage = `✅ Tu sugerencia para el staff ha sido enviada al canal <#${channelId}>`;
         if (!savedInDb) {
-            replyMessage += '\n⚠️ No se pudo guardar en la base de datos, pero la sugerencia seguirá visible en el canal.';
+            replyMessage += '\n⚠️ No se pudo guardar en la base de datos, pero la hemos almacenado temporalmente en la tablet del bot.';
         }
 
         await interaction.reply({

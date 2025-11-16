@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
 const config = require('../../config/config.js');
 const { Suggestion, isMongoConnected } = require('../models/Suggestion');
+const { getTabletSuggestion, updateTabletSuggestion } = require('../utils/tabletSuggestions');
 
 const staffGuildId = config.staffSuggestionsGuildId;
 
@@ -25,16 +26,23 @@ module.exports = {
         const id = interaction.options.getInteger('id');
         const razon = interaction.options.getString('razon');
 
-        if (!isMongoConnected()) {
-            return interaction.reply({ content: '⚠️ La base de datos no está disponible actualmente. Inténtalo más tarde.', ephemeral: true });
-        }
-
         let sugg;
+        let fromTablet = false;
         try {
-            sugg = await Suggestion.findOne({ id, scope: 'staff' }).exec();
+            if (isMongoConnected()) {
+                sugg = await Suggestion.findOne({ id, scope: 'staff' }).exec();
+            }
         } catch (error) {
             console.error('Error consultando sugerencia del staff en MongoDB:', error);
             return interaction.reply({ content: '❌ No se pudo consultar la base de datos de sugerencias del staff. Inténtalo nuevamente más tarde.', ephemeral: true });
+        }
+
+        if (!sugg) {
+            const cached = getTabletSuggestion(id);
+            if (cached) {
+                sugg = cached;
+                fromTablet = true;
+            }
         }
 
         if (!sugg) return interaction.reply({ content: `No se encontró la sugerencia del staff con ID ${id}.`, ephemeral: true });
@@ -75,7 +83,11 @@ module.exports = {
             updatedFields.push({ name: 'Razón', value: razon, inline: false });
             embed.data.fields = updatedFields;
 
-            try { await sugg.save(); } catch (e) { console.error('No se pudo guardar la sugerencia del staff en MongoDB', e); }
+            if (!fromTablet && typeof sugg.save === 'function') {
+                try { await sugg.save(); } catch (e) { console.error('No se pudo guardar la sugerencia del staff en MongoDB', e); }
+            } else {
+                updateTabletSuggestion(id, { status: sugg.status, reason: sugg.reason });
+            }
 
             await message.edit({ embeds: [EmbedBuilder.from(embed)] });
             await interaction.reply({ content: `✅ Sugerencia del staff ${id} rechazada. Razón: ${razon}`, ephemeral: true });
