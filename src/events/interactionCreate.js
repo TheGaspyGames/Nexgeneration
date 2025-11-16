@@ -1,5 +1,7 @@
 const { Events, ActionRowBuilder, ButtonBuilder } = require('discord.js');
 const config = require('../../config/config.js');
+const settings = require('../../config/settings.json');
+const automodCache = require('../utils/automodCache');
 
 module.exports = {
     name: Events.InteractionCreate,
@@ -27,10 +29,9 @@ module.exports = {
             if (!command) return;
 
             // Verificar si estamos en el servidor permitido
-            const settings = require('../../config/settings.json');
             if (settings.guildId && interaction.guildId !== settings.guildId) {
-                await interaction.reply({ 
-                    content: '⚠️ Este bot solo está configurado para funcionar en un servidor específico.', 
+                await interaction.reply({
+                    content: '⚠️ Este bot solo está configurado para funcionar en un servidor específico.',
                     ephemeral: true 
                 });
                 return;
@@ -127,6 +128,8 @@ module.exports = {
                 await interaction.client.giveawayManager.handleJoin(interaction);
             } else if (interaction.customId === 'giveaway-participants') {
                 await interaction.client.giveawayManager.handleParticipants(interaction);
+            } else if (interaction.customId?.startsWith('giveaway-leave:')) {
+                await interaction.client.giveawayManager.handleLeave(interaction);
             }
         }
     },
@@ -155,6 +158,9 @@ function removeBannedWords(words) {
             config.autoModeration.bannedWords.splice(i, 1);
             removed++;
         }
+    }
+    if (removed > 0 && typeof automodCache.invalidate === 'function') {
+        automodCache.invalidate();
     }
     return removed;
 }
