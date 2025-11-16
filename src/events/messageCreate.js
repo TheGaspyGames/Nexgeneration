@@ -16,6 +16,20 @@ const IP_TRIGGER_PHRASES = [
 const IP_TRIGGER_SET = new Set(IP_TRIGGER_PHRASES);
 const IP_RESPONSE_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutos
 
+const IP_TRIGGER_PHRASES = [
+    'ip',
+    'ip del server',
+    'ip del servidor',
+    'ip server',
+    'ip servidor',
+    'cual es la ip',
+    'cual es la ip del server',
+    'cual es la ip del servidor',
+    'cual es la ip server'
+];
+const IP_TRIGGER_SET = new Set(IP_TRIGGER_PHRASES);
+const IP_RESPONSE_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutos
+
 module.exports = {
     name: Events.MessageCreate,
     async execute(message) {
