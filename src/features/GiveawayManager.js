@@ -40,6 +40,7 @@ class GiveawayManager {
         if (requiredInvites && requiredInvites > 0) {
             embed.addFields({ name: 'Invites requeridos', value: `${requiredInvites} invite(s)`, inline: false });
         }
+        embed.addFields({ name: 'Participantes', value: '0', inline: false });
 
         const buttons = new ActionRowBuilder()
             .addComponents(
@@ -208,6 +209,7 @@ class GiveawayManager {
         }
 
         this.giveaways.set(interaction.message.id, giveaway);
+        await this.updateParticipantsField(interaction.message, giveaway);
     }
 
     async handleParticipants(interaction) {
@@ -221,11 +223,53 @@ class GiveawayManager {
 
         const participants = Array.from(giveaway.participants);
         const participantCount = participants.length;
+        const participantList = participantCount > 0
+            ? participants.map((id, index) => `${index + 1}.- <@${id}>`).join('\n')
+            : 'No hay participantes registrados todavía.';
+
+        const embed = new EmbedBuilder()
+            .setTitle('📋 Participantes del sorteo')
+            .setDescription(participantList)
+            .addFields({ name: 'Total', value: `${participantCount}`, inline: false })
+            .setColor('#5865F2');
 
         await interaction.reply({
-            content: `🎉 Hay ${participantCount} participante${participantCount !== 1 ? 's' : ''} en este sorteo.`,
+            embeds: [embed],
             ephemeral: true
         });
+    }
+
+    async updateParticipantsField(message, giveaway) {
+        try {
+            let targetMessage = message;
+            if (!targetMessage) {
+                const channel = await this.client.channels.fetch(giveaway.channelId);
+                if (!channel) return;
+                targetMessage = await channel.messages.fetch(giveaway.messageId);
+            }
+
+            if (!targetMessage || !targetMessage.embeds.length) return;
+
+            const updatedEmbed = EmbedBuilder.from(targetMessage.embeds[0]);
+            const fields = updatedEmbed.data.fields ? [...updatedEmbed.data.fields] : [];
+            const participantIndex = fields.findIndex(field => field.name === 'Participantes');
+            const participantValue = `${giveaway.participants.size}`;
+
+            if (participantIndex !== -1) {
+                fields[participantIndex] = { ...fields[participantIndex], value: participantValue };
+            } else {
+                fields.push({ name: 'Participantes', value: participantValue, inline: false });
+            }
+
+            updatedEmbed.setFields(fields);
+
+            await targetMessage.edit({
+                embeds: [updatedEmbed],
+                components: targetMessage.components
+            });
+        } catch (error) {
+            console.error('Error actualizando el contador de participantes del sorteo:', error);
+        }
     }
 }
 
