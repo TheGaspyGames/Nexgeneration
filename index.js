@@ -1,7 +1,27 @@
-const { Client, GatewayIntentBits, Partials, Collection, REST, Routes } = require('discord.js');
+const { Client, GatewayIntentBits, Partials, Collection, REST, Routes, ActivityType, EmbedBuilder } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
 require('dotenv').config();
+const config = require('./config/config.js');
+
+const CHANNEL_CACHE_TTL_MS = 10 * 60 * 1000;
+const channelCache = new Map();
+
+const getCachedChannel = (channelId) => {
+    const entry = channelCache.get(channelId);
+    if (!entry) return null;
+    if (entry.expiresAt > Date.now()) {
+        return entry.channel;
+    }
+    channelCache.delete(channelId);
+    return null;
+};
+
+const cacheChannel = (channelId, channel, ttl = CHANNEL_CACHE_TTL_MS) => {
+    if (!channelId || !channel) return channel;
+    channelCache.set(channelId, { channel, expiresAt: Date.now() + ttl });
+    return channel;
+};
 
 const client = new Client({
     intents: [
@@ -17,6 +37,114 @@ const client = new Client({
         Partials.Reaction
     ]
 });
+
+client.settings = { suggestionsChannel: null };
+
+client.invalidateChannelCache = (channelId) => {
+    const key = channelId ? channelId.toString() : null;
+    if (!key) return;
+    channelCache.delete(key);
+};
+
+client.resolveChannel = async function (channelId, options = {}) {
+    if (!channelId) return null;
+    const normalizedId = channelId.toString();
+    const { force = false, ttl = CHANNEL_CACHE_TTL_MS } = options;
+
+    if (!force) {
+        const cached = getCachedChannel(normalizedId);
+        if (cached) return cached;
+
+        const collectionChannel = client.channels.cache.get(normalizedId);
+        if (collectionChannel) {
+            return cacheChannel(normalizedId, collectionChannel, ttl);
+        }
+    } else {
+        client.invalidateChannelCache(normalizedId);
+    }
+
+    try {
+        const fetched = await client.channels.fetch(normalizedId);
+        if (fetched) {
+            cacheChannel(normalizedId, fetched, ttl);
+        }
+        return fetched ?? null;
+    } catch (error) {
+        client.invalidateChannelCache(normalizedId);
+        return null;
+    }
+};
+
+client.resolveGuild = async function (guildId) {
+    if (!guildId) return null;
+    const normalizedId = guildId.toString();
+    const cached = client.guilds.cache.get(normalizedId);
+    if (cached) return cached;
+
+    try {
+        return await client.guilds.fetch(normalizedId);
+    } catch (error) {
+        return null;
+    }
+};
+
+client.userCountStats = { nonBot: 0, lastSync: 0 };
+
+client.updatePresenceCount = async function (options = {}) {
+    if (!client.user) return 0;
+
+    const normalized = typeof options === 'number'
+        ? { delta: options }
+        : (options || {});
+
+    const delta = normalized.delta ?? 0;
+    const force = Boolean(normalized.force);
+    const guildId = client.settings?.guildId;
+    if (!guildId) {
+        return client.userCountStats.nonBot;
+    }
+
+    if (force || client.userCountStats.lastSync === 0) {
+        const guild = await client.resolveGuild(guildId);
+        if (!guild) {
+            return client.userCountStats.nonBot;
+        }
+
+        let members;
+        try {
+            members = await guild.members.fetch();
+        } catch (error) {
+            members = guild.members.cache;
+        }
+
+        let nonBotCount = 0;
+        members.forEach(member => {
+            if (!member.user.bot) {
+                nonBotCount++;
+            }
+        });
+
+        client.userCountStats.nonBot = nonBotCount;
+        client.userCountStats.lastSync = Date.now();
+    } else if (delta !== 0) {
+        client.userCountStats.nonBot = Math.max(0, client.userCountStats.nonBot + delta);
+    }
+
+    const activityName = `${client.userCountStats.nonBot} usuarios`;
+    try {
+        await client.user.setPresence({
+            activities: [{
+                name: activityName,
+                type: ActivityType.Watching
+            }],
+            status: 'online'
+        });
+    } catch (error) {
+        console.error('Error actualizando la presencia:', error.message || error);
+    }
+
+    return client.userCountStats.nonBot;
+};
 
 // Conectar a MongoDB si existe MONGODB_URI
 const mongoose = require('mongoose');
@@ -241,58 +369,30 @@ client.settings = settings;
 // Helper para enviar logs internos al canal de logs configurado
 client.log = async function (type, title, description, executor) {
     try {
-        const config = require('./config/config.js');
         const guildId = config.logs && config.logs.guildId;
         const channelId = config.logs && config.logs.channelId;
-
-        // Debug: Verificar configuración
-        console.log('[DEBUG] Configuración de logs:', {
-            guildId: guildId || 'No configurado',
-            channelId: channelId || 'No configurado'
-        });
 
         if (!guildId || !channelId) {
             console.warn('[LOGS] No se encontró configuración de logs en config.js');
             return;
         }
 
-        const guild = await client.guilds.fetch(guildId).catch(e => {
-            console.error('[LOGS] Error al obtener guild:', e.message);
-            return null;
-        });
-        
-        if (!guild) {
-            console.error(`[LOGS] No se pudo encontrar el servidor ${guildId}`);
+        const channel = await client.resolveChannel(channelId);
+        if (!channel || channel.guildId !== guildId || typeof channel.send !== 'function') {
+            console.error(`[LOGS] No se pudo obtener el canal ${channelId} para enviar logs.`);
             return;
         }
 
-        const channel = await guild.channels.fetch(channelId).catch(e => {
-            console.error('[LOGS] Error al obtener canal:', e.message);
-            return null;
-        });
-        
-        if (!channel) {
-            console.error(`[LOGS] No se pudo encontrar el canal ${channelId} en el servidor ${guild.name}`);
+        const me = channel.guild?.members?.me;
+        const permissions = me ? channel.permissionsFor(me) : null;
+        if (!permissions || !permissions.has('SendMessages') || !permissions.has('ViewChannel') || !permissions.has('EmbedLinks')) {
+            console.error('[LOGS] El bot no tiene los permisos necesarios en el canal de logs.');
             return;
         }
 
-        // Debug: Verificar permisos
-        const permissions = channel.permissionsFor(guild.members.me);
-        if (!permissions.has('SendMessages') || !permissions.has('ViewChannel') || !permissions.has('EmbedLinks')) {
-            console.error('[LOGS] El bot no tiene los permisos necesarios en el canal de logs:', {
-                SendMessages: permissions.has('SendMessages'),
-                ViewChannel: permissions.has('ViewChannel'),
-                EmbedLinks: permissions.has('EmbedLinks')
-            });
-            return;
-        }
-        const { EmbedBuilder } = require('discord.js');
-
-        // Parsear canal e interior desde la descripción
         const channelRaw = description && description.includes('Canal:') ? description.split('Canal: ')[1].split('\n')[0] : 'N/A';
         const interiorLine = description && description.split('\n').find(line => line.startsWith('Interior:'));
         const interior = interiorLine ? interiorLine.replace('Interior: ', '') : '';
-
         const channelDisplay = /^\d+$/.test(channelRaw) ? `<#${channelRaw}>` : channelRaw;
 
         const embed = new EmbedBuilder()
@@ -300,27 +400,24 @@ client.log = async function (type, title, description, executor) {
             .setColor('#3498db')
             .setTimestamp();
 
-        // Usuario
         if (executor && executor.id) {
             embed.addFields([{ name: 'Usuario', value: `${executor.tag || executor.name || 'Desconocido'}\nID: ${executor.id}`, inline: false }]);
         } else {
             embed.addFields([{ name: 'Usuario', value: 'Desconocido', inline: false }]);
         }
 
-        // Comando y canal
         embed.addFields([
             { name: 'Comando', value: title || 'N/A', inline: true },
             { name: 'Canal', value: channelDisplay, inline: true }
         ]);
 
-        // Interior (argumentos)
         if (interior) {
             embed.addFields([{ name: 'Interior', value: interior, inline: false }]);
         }
 
-        console.log(`[DEBUG] Enviando log a ${channelId}:`, { type, title, channelRaw, interior, executor: executor ? `${executor.tag} (${executor.id})` : 'No executor' });
-
-        await channel.send({ embeds: [embed] }).catch(() => null);
+        await channel.send({ embeds: [embed] }).catch(error => {
+            console.error('No se pudo enviar el log:', error.message || error);
+        });
     } catch (err) {
         console.error('Error enviando log:', err.message);
     }

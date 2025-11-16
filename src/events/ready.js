@@ -1,5 +1,6 @@
-const { Events, ActivityType } = require('discord.js');
-const settings = require('../../config/settings.json');
+const { Events } = require('discord.js');
+
+const PRESENCE_RESYNC_INTERVAL_MS = 30 * 60 * 1000;
 
 module.exports = {
     name: Events.ClientReady,
@@ -12,34 +13,15 @@ module.exports = {
         const GiveawayManager = require('../features/GiveawayManager');
         client.giveawayManager = new GiveawayManager(client);
 
-        // Función para actualizar el contador de usuarios con fetch (más precisa)
-        async function updateUserCount() {
-            const guild = client.guilds.cache.get(settings.guildId);
-            if (!guild) return;
+        const resyncPresence = () => {
+            client.updatePresenceCount({ force: true }).catch(() => {});
+        };
 
-            // Intentar obtener miembros actualizados; si falla usar cache
-            let members = null;
-            try {
-                members = await guild.members.fetch();
-            } catch (e) {
-                members = guild.members.cache;
-            }
-
-            const userCount = members.filter(member => !member.user.bot).size;
-            client.user.setPresence({
-                activities: [{
-                    name: `${userCount} usuarios`,
-                    type: ActivityType.Watching
-                }],
-                status: 'online'
-            });
+        resyncPresence();
+        client.presenceResyncInterval = setInterval(resyncPresence, PRESENCE_RESYNC_INTERVAL_MS);
+        if (client.presenceResyncInterval.unref) {
+            client.presenceResyncInterval.unref();
         }
-
-        // Actualizar el contador inicialmente (no bloqueante)
-        updateUserCount().catch(() => {});
-
-        // Actualizar el contador cada 1 minuto
-        setInterval(() => updateUserCount().catch(() => {}), 60 * 1000);
 
         // Restaurar temporizadores de sorteos activos
         if (client.giveaways && client.giveaways.size > 0) {
