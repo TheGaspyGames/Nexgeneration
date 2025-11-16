@@ -2,6 +2,8 @@ const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } = require('disc
 const config = require('../../config/config.js');
 const { Suggestion, getNextSequence, isMongoConnected } = require('../models/Suggestion');
 
+const staffGuildId = config.staffSuggestionsGuildId;
+
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('staffsugerir')
@@ -11,11 +13,11 @@ module.exports = {
                 .setDescription('Tu sugerencia para el staff')
                 .setRequired(true))
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
+    allowedGuilds: staffGuildId ? [staffGuildId] : [],
 
     async execute(interaction) {
         const suggestion = interaction.options.getString('sugerencia');
         const channelId = config.staffSuggestionsChannel;
-        const staffGuildId = config.staffSuggestionsGuildId;
         const channel = await interaction.client.resolveChannel(channelId);
 
         if (!channel || (staffGuildId && channel.guildId !== staffGuildId)) {

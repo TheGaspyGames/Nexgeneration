@@ -2,6 +2,8 @@ const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('disc
 const config = require('../../config/config.js');
 const { Suggestion, isMongoConnected } = require('../models/Suggestion');
 
+const staffGuildId = config.staffSuggestionsGuildId;
+
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('staffsugerencia')
@@ -14,6 +16,7 @@ module.exports = {
             )
         )
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
+    allowedGuilds: staffGuildId ? [staffGuildId] : [],
 
     async execute(interaction) {
         const id = interaction.options.getInteger('id');
@@ -33,7 +36,6 @@ module.exports = {
 
         if (!sugg) return interaction.reply({ content: `No se encontró la sugerencia del staff con ID ${id}.`, ephemeral: true });
         try {
-            const staffGuildId = config.staffSuggestionsGuildId;
             const channel = await interaction.client.resolveChannel(sugg.channelId);
             if (!channel || (staffGuildId && channel.guildId !== staffGuildId)) {
                 return interaction.reply({ content: 'No se encontró el canal privado de la sugerencia.', ephemeral: true });
