@@ -30,6 +30,10 @@ module.exports = {
             option.setName('rol_requerido')
                 .setDescription('Rol requerido para poder participar (opcional)')
                 .setRequired(false))
+        .addRoleOption(option =>
+            option.setName('rol_bloqueado')
+                .setDescription('Rol que no podrá participar en el sorteo (opcional)')
+                .setRequired(false))
         .addIntegerOption(option =>
             option.setName('mensajes_minimos')
                 .setDescription('Cantidad mínima de mensajes necesarios para participar (0 para desactivar)')
@@ -49,8 +53,9 @@ module.exports = {
         const channel = interaction.options.getChannel('canal');
         const minMessages = interaction.options.getInteger('mensajes_minimos') || 0;
         const requiredRole = interaction.options.getRole('rol_requerido') || null;
+        const excludedRole = interaction.options.getRole('rol_bloqueado') || null;
         const hostOption = interaction.options.getUser('host') || null;
-    const requiredInvites = interaction.options.getInteger('invites_requeridos') || 0;
+        const requiredInvites = interaction.options.getInteger('invites_requeridos') || 0;
 
         try {
             const giveaway = await interaction.client.giveawayManager.createGiveaway({
@@ -61,12 +66,19 @@ module.exports = {
                 host: hostOption || interaction.user,
                 minMessages,
                 requiredRole: requiredRole ? requiredRole.id : null,
+                excludedRole: excludedRole ? excludedRole.id : null,
                 requiredInvites: requiredInvites
             });
 
             if (giveaway) {
+                const extraInfo = `${minMessages > 0 ? `\nLos participantes necesitarán ${minMessages} mensajes para participar.` : ''}` +
+                    `${requiredRole ? `\nRol requerido: ${requiredRole}` : ''}` +
+                    `${excludedRole ? `\nRol bloqueado: ${excludedRole}` : ''}` +
+                    `${requiredInvites > 0 ? `\nInvites requeridos: ${requiredInvites}` : ''}` +
+                    `${hostOption ? `\nHost establecido: ${hostOption.tag}` : ''}`;
+
                 await interaction.reply({
-                    content: `✅ ¡Sorteo creado exitosamente en ${channel}!${minMessages > 0 ? `\nLos participantes necesitarán ${minMessages} mensajes para participar.` : ''}${requiredRole ? `\nRol requerido: ${requiredRole}` : ''}${requiredInvites > 0 ? `\nInvites requeridos: ${requiredInvites}` : ''}${hostOption ? `\nHost establecido: ${hostOption.tag}` : ''}`,
+                    content: `✅ ¡Sorteo creado exitosamente en ${channel}!${extraInfo}`,
                     ephemeral: true
                 });
             } else {
