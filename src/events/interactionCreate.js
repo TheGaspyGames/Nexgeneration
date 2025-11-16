@@ -127,6 +127,8 @@ module.exports = {
                 await interaction.client.giveawayManager.handleJoin(interaction);
             } else if (interaction.customId === 'giveaway-participants') {
                 await interaction.client.giveawayManager.handleParticipants(interaction);
+            } else if (interaction.customId?.startsWith('giveaway-leave:')) {
+                await interaction.client.giveawayManager.handleLeave(interaction);
             }
         }
     },

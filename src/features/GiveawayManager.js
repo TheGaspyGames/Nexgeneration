@@ -4,8 +4,45 @@ const ms = require('ms');
 class GiveawayManager {
     constructor(client) {
         this.client = client;
-            this.giveaways = new Map();
-            this.messageCount = new Map(); // Para rastrear los mensajes de los usuarios
+        this.giveaways = new Map();
+        this.messageCount = new Map(); // Para rastrear los mensajes de los usuarios
+        this.expirationWatcher = null;
+        this.startExpirationWatcher();
+    }
+
+    startExpirationWatcher() {
+        if (this.expirationWatcher) return;
+
+        this.expirationWatcher = setInterval(() => {
+            this.sweepExpiredGiveaways();
+        }, 5 * 1000); // Revisa cada 5 segundos para finalizar sorteos apenas expiren
+    }
+
+    stopExpirationWatcherIfIdle() {
+        if (!this.expirationWatcher) return;
+
+        const hasActiveGiveaways = Array.from(this.giveaways.values()).some(giveaway => !giveaway.ended);
+        if (!hasActiveGiveaways) {
+            clearInterval(this.expirationWatcher);
+            this.expirationWatcher = null;
+        }
+    }
+
+    sweepExpiredGiveaways() {
+        if (!this.giveaways.size) {
+            this.stopExpirationWatcherIfIdle();
+            return;
+        }
+
+        const now = Date.now();
+        for (const [messageId, giveaway] of this.giveaways.entries()) {
+            if (giveaway.ended) continue;
+            if (giveaway.endTime <= now) {
+                this.endGiveaway(messageId).catch(error => {
+                    console.error('Error al finalizar un sorteo expirado:', error);
+                });
+            }
+        }
     }
 
     async createGiveaway(options) {
@@ -40,6 +77,7 @@ class GiveawayManager {
         if (requiredInvites && requiredInvites > 0) {
             embed.addFields({ name: 'Invites requeridos', value: `${requiredInvites} invite(s)`, inline: false });
         }
+        embed.addFields({ name: 'Participantes', value: '0', inline: false });
 
         const buttons = new ActionRowBuilder()
             .addComponents(
@@ -76,6 +114,7 @@ class GiveawayManager {
 
         this.giveaways.set(giveawayMessage.id, giveaway);
         this.setTimer(giveawayMessage.id);
+        this.startExpirationWatcher();
 
         return giveaway;
     }
@@ -125,15 +164,26 @@ class GiveawayManager {
 
         giveaway.ended = true;
         this.giveaways.set(messageId, giveaway);
+        this.stopExpirationWatcherIfIdle();
     }
 
     setTimer(messageId) {
         const giveaway = this.giveaways.get(messageId);
         if (!giveaway) return;
 
+        const delay = Math.max(0, giveaway.endTime - Date.now());
+        if (delay === 0) {
+            this.endGiveaway(messageId).catch(error => {
+                console.error('Error al finalizar un sorteo al instante:', error);
+            });
+            return;
+        }
+
         setTimeout(() => {
-            this.endGiveaway(messageId);
-        }, giveaway.endTime - Date.now());
+            this.endGiveaway(messageId).catch(error => {
+                console.error('Error al finalizar un sorteo programado:', error);
+            });
+        }, delay);
     }
 
     async handleJoin(interaction) {
@@ -194,9 +244,16 @@ class GiveawayManager {
             }
 
         if (giveaway.participants.has(interaction.user.id)) {
-            giveaway.participants.delete(interaction.user.id);
-            await interaction.reply({
-                content: '❌ Has abandonado el sorteo.',
+            const leaveRow = new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setCustomId(`giveaway-leave:${interaction.message.id}`)
+                    .setLabel('Salir del sorteo')
+                    .setStyle(ButtonStyle.Danger)
+            );
+
+            return interaction.reply({
+                content: '¿Estás seguro de salir del sorteo?',
+                components: [leaveRow],
                 ephemeral: true
             });
         } else {
@@ -208,6 +265,50 @@ class GiveawayManager {
         }
 
         this.giveaways.set(interaction.message.id, giveaway);
+        await this.updateParticipantsField(interaction.message, giveaway);
+    }
+
+    async handleLeave(interaction) {
+        try {
+            const [, messageId] = interaction.customId.split(':');
+            if (!messageId) {
+                return interaction.reply({
+                    content: '❌ No se pudo procesar tu solicitud.',
+                    ephemeral: true
+                });
+            }
+
+            const giveaway = this.giveaways.get(messageId);
+            if (!giveaway || giveaway.ended) {
+                return interaction.update({
+                    content: '❌ Este sorteo ya no está disponible.',
+                    components: []
+                });
+            }
+
+            if (!giveaway.participants.has(interaction.user.id)) {
+                return interaction.update({
+                    content: '⚠️ Ya no estás participando en este sorteo.',
+                    components: []
+                });
+            }
+
+            giveaway.participants.delete(interaction.user.id);
+            this.giveaways.set(messageId, giveaway);
+            await this.updateParticipantsField(null, giveaway);
+
+            await interaction.update({
+                content: '❌ Has abandonado el sorteo.',
+                components: []
+            });
+        } catch (error) {
+            console.error('Error al manejar la salida del sorteo:', error);
+            if (interaction.deferred || interaction.replied) {
+                await interaction.followUp({ content: '❌ Hubo un problema al procesar tu solicitud.', ephemeral: true });
+            } else {
+                await interaction.reply({ content: '❌ Hubo un problema al procesar tu solicitud.', ephemeral: true });
+            }
+        }
     }
 
     async handleParticipants(interaction) {
@@ -221,11 +322,53 @@ class GiveawayManager {
 
         const participants = Array.from(giveaway.participants);
         const participantCount = participants.length;
+        const participantList = participantCount > 0
+            ? participants.map((id, index) => `${index + 1}.- <@${id}>`).join('\n')
+            : 'No hay participantes registrados todavía.';
+
+        const embed = new EmbedBuilder()
+            .setTitle('📋 Participantes del sorteo')
+            .setDescription(participantList)
+            .addFields({ name: 'Total', value: `${participantCount}`, inline: false })
+            .setColor('#5865F2');
 
         await interaction.reply({
-            content: `🎉 Hay ${participantCount} participante${participantCount !== 1 ? 's' : ''} en este sorteo.`,
+            embeds: [embed],
             ephemeral: true
         });
+    }
+
+    async updateParticipantsField(message, giveaway) {
+        try {
+            let targetMessage = message;
+            if (!targetMessage) {
+                const channel = await this.client.channels.fetch(giveaway.channelId);
+                if (!channel) return;
+                targetMessage = await channel.messages.fetch(giveaway.messageId);
+            }
+
+            if (!targetMessage || !targetMessage.embeds.length) return;
+
+            const updatedEmbed = EmbedBuilder.from(targetMessage.embeds[0]);
+            const fields = updatedEmbed.data.fields ? [...updatedEmbed.data.fields] : [];
+            const participantIndex = fields.findIndex(field => field.name === 'Participantes');
+            const participantValue = `${giveaway.participants.size}`;
+
+            if (participantIndex !== -1) {
+                fields[participantIndex] = { ...fields[participantIndex], value: participantValue };
+            } else {
+                fields.push({ name: 'Participantes', value: participantValue, inline: false });
+            }
+
+            updatedEmbed.setFields(fields);
+
+            await targetMessage.edit({
+                embeds: [updatedEmbed],
+                components: targetMessage.components
+            });
+        } catch (error) {
+            console.error('Error actualizando el contador de participantes del sorteo:', error);
+        }
     }
 }
 
