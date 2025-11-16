@@ -195,9 +195,16 @@ class GiveawayManager {
             }
 
         if (giveaway.participants.has(interaction.user.id)) {
-            giveaway.participants.delete(interaction.user.id);
-            await interaction.reply({
-                content: '❌ Has abandonado el sorteo.',
+            const leaveRow = new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setCustomId(`giveaway-leave:${interaction.message.id}`)
+                    .setLabel('Salir del sorteo')
+                    .setStyle(ButtonStyle.Danger)
+            );
+
+            return interaction.reply({
+                content: '¿Estás seguro de salir del sorteo?',
+                components: [leaveRow],
                 ephemeral: true
             });
         } else {
@@ -210,6 +217,49 @@ class GiveawayManager {
 
         this.giveaways.set(interaction.message.id, giveaway);
         await this.updateParticipantsField(interaction.message, giveaway);
+    }
+
+    async handleLeave(interaction) {
+        try {
+            const [, messageId] = interaction.customId.split(':');
+            if (!messageId) {
+                return interaction.reply({
+                    content: '❌ No se pudo procesar tu solicitud.',
+                    ephemeral: true
+                });
+            }
+
+            const giveaway = this.giveaways.get(messageId);
+            if (!giveaway || giveaway.ended) {
+                return interaction.update({
+                    content: '❌ Este sorteo ya no está disponible.',
+                    components: []
+                });
+            }
+
+            if (!giveaway.participants.has(interaction.user.id)) {
+                return interaction.update({
+                    content: '⚠️ Ya no estás participando en este sorteo.',
+                    components: []
+                });
+            }
+
+            giveaway.participants.delete(interaction.user.id);
+            this.giveaways.set(messageId, giveaway);
+            await this.updateParticipantsField(null, giveaway);
+
+            await interaction.update({
+                content: '❌ Has abandonado el sorteo.',
+                components: []
+            });
+        } catch (error) {
+            console.error('Error al manejar la salida del sorteo:', error);
+            if (interaction.deferred || interaction.replied) {
+                await interaction.followUp({ content: '❌ Hubo un problema al procesar tu solicitud.', ephemeral: true });
+            } else {
+                await interaction.reply({ content: '❌ Hubo un problema al procesar tu solicitud.', ephemeral: true });
+            }
+        }
     }
 
     async handleParticipants(interaction) {
