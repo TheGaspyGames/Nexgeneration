@@ -1,10 +1,14 @@
 const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
+const config = require('../../config/config.js');
 const { Suggestion, isMongoConnected } = require('../models/Suggestion');
+const { getTabletSuggestion, updateTabletSuggestion } = require('../utils/tabletSuggestions');
+
+const staffGuildId = config.staffSuggestionsGuildId;
 
 module.exports = {
     data: new SlashCommandBuilder()
-        .setName('sugerencia')
-        .setDescription('Acciones de moderación sobre una sugerencia')
+        .setName('staffsugerencia')
+        .setDescription('Gestiona una sugerencia privada del staff')
         .addIntegerOption(opt => opt.setName('id').setDescription('ID de la sugerencia').setRequired(true))
         .addStringOption(opt => opt.setName('accion').setDescription('Acción a realizar').setRequired(true)
             .addChoices(
@@ -12,35 +16,45 @@ module.exports = {
                 { name: 'implementada', value: 'implementada' }
             )
         )
-        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+        .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
+    allowedGuilds: staffGuildId ? [staffGuildId] : [],
+    allowInLogsGuild: true,
 
     async execute(interaction) {
+        if (!staffGuildId || interaction.guildId !== staffGuildId) {
+            return interaction.reply({
+                content: '⚠️ Este comando solo está disponible dentro del servidor privado del staff.',
+                ephemeral: true
+            });
+        }
+
         const id = interaction.options.getInteger('id');
         const accion = interaction.options.getString('accion');
 
-        if (!isMongoConnected()) {
-            return interaction.reply({ content: '⚠️ La base de datos no está disponible actualmente. Inténtalo más tarde.', ephemeral: true });
-        }
-
         let sugg;
+        let fromTablet = false;
         try {
-            sugg = await Suggestion.findOne({
-                id,
-                $or: [
-                    { scope: { $exists: false } },
-                    { scope: 'public' }
-                ]
-            }).exec();
+            if (isMongoConnected()) {
+                sugg = await Suggestion.findOne({ id, scope: 'staff' }).exec();
+            }
         } catch (error) {
-            console.error('Error consultando sugerencia en MongoDB:', error);
-            return interaction.reply({ content: '❌ No se pudo consultar la base de datos de sugerencias. Inténtalo nuevamente más tarde.', ephemeral: true });
+            console.error('Error consultando sugerencia del staff en MongoDB:', error);
+            return interaction.reply({ content: '❌ No se pudo consultar la base de datos de sugerencias del staff. Inténtalo nuevamente más tarde.', ephemeral: true });
         }
 
-        if (!sugg) return interaction.reply({ content: `No se encontró la sugerencia con ID ${id}.`, ephemeral: true });
+        if (!sugg) {
+            const cached = getTabletSuggestion(id);
+            if (cached) {
+                sugg = cached;
+                fromTablet = true;
+            }
+        }
+
+        if (!sugg) return interaction.reply({ content: `No se encontró la sugerencia del staff con ID ${id}.`, ephemeral: true });
         try {
             const channel = await interaction.client.resolveChannel(sugg.channelId);
-            if (!channel || channel.guildId !== interaction.guildId) {
-                return interaction.reply({ content: 'No se encontró el canal de la sugerencia.', ephemeral: true });
+            if (!channel || (staffGuildId && channel.guildId !== staffGuildId)) {
+                return interaction.reply({ content: 'No se encontró el canal privado de la sugerencia.', ephemeral: true });
             }
             const message = await channel.messages.fetch(sugg.messageId).catch(() => null);
             if (!message) return interaction.reply({ content: 'No se encontró el mensaje de la sugerencia.', ephemeral: true });
@@ -55,18 +69,16 @@ module.exports = {
                 try { embed.setColor('#2ECC71'); } catch (e) { /* ignore */ }
             }
 
-            // Asegurar que la imagen del autor esté como thumbnail
             if (sugg.authorAvatar) {
                 try { embed.setThumbnail(sugg.authorAvatar); } catch (e) { /* ignore */ }
             }
 
-            // Actualizar estado en el campo correspondiente
             embed.data.fields = embed.data.fields.map(f => {
                 if (f.name === 'Estado') {
-                    return { 
-                        name: 'Estado', 
+                    return {
+                        name: 'Estado',
                         value: accion === 'aprobar' ? '✅ Aprobada' : '🚀 Implementada',
-                        inline: true 
+                        inline: true
                     };
                 } else if (f.name === 'Votos') {
                     const upvotes = message.reactions.cache.get('👍')?.count || 0;
@@ -80,14 +92,17 @@ module.exports = {
                 return f;
             });
 
-            // Guardar cambios en Mongo
-            try { await sugg.save(); } catch (e) { console.error('No se pudo guardar sugerencia en MongoDB', e); }
+            if (!fromTablet && typeof sugg.save === 'function') {
+                try { await sugg.save(); } catch (e) { console.error('No se pudo guardar sugerencia del staff en MongoDB', e); }
+            } else {
+                updateTabletSuggestion(id, { status: sugg.status });
+            }
 
             await message.edit({ embeds: [EmbedBuilder.from(embed)] });
-            await interaction.reply({ content: `✅ Sugerencia ${id} actualizada: ${sugg.status}`, ephemeral: true });
+            await interaction.reply({ content: `✅ Sugerencia del staff ${id} actualizada: ${sugg.status}`, ephemeral: true });
         } catch (e) {
-            console.error('Error al procesar sugerencia:', e);
-            return interaction.reply({ content: 'Ocurrió un error al procesar la sugerencia.', ephemeral: true });
+            console.error('Error al procesar sugerencia del staff:', e);
+            return interaction.reply({ content: 'Ocurrió un error al procesar la sugerencia del staff.', ephemeral: true });
         }
     }
 };

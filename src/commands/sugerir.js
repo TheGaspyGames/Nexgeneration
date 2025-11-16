@@ -76,6 +76,7 @@ module.exports = {
                     messageId: message.id,
                     channelId: channel.id,
                     content: suggestion,
+                    scope: 'public',
                     status: 'Pendiente',
                     approvals: 0
                 });

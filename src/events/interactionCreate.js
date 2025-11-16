@@ -29,16 +29,29 @@ module.exports = {
             if (!command) return;
 
             // Verificar si estamos en el servidor permitido
-            if (settings.guildId && interaction.guildId !== settings.guildId) {
+            const allowedGuilds = Array.isArray(command.allowedGuilds)
+                ? command.allowedGuilds.map(id => id && id.toString()).filter(Boolean)
+                : [];
+
+            if (allowedGuilds.length > 0) {
+                if (!interaction.guildId || !allowedGuilds.includes(interaction.guildId)) {
+                    await interaction.reply({
+                        content: '⚠️ Este comando no está disponible en este servidor.',
+                        ephemeral: true
+                    });
+                    return;
+                }
+            } else if (settings.guildId && interaction.guildId !== settings.guildId) {
                 await interaction.reply({
                     content: '⚠️ Este bot solo está configurado para funcionar en un servidor específico.',
-                    ephemeral: true 
+                    ephemeral: true
                 });
                 return;
             }
 
             // Si estamos en el server de logs, no ejecutar comandos (solo mostrar logs)
             const logsGuild = config.logs && config.logs.guildId;
+            const allowInLogsGuild = command.allowInLogsGuild === true;
             const args = [];
             if (interaction.options && interaction.options.data) {
                 for (const option of interaction.options.data) {
@@ -56,7 +69,7 @@ module.exports = {
             const logDescription = `Canal: ${interaction.channelId}\nInterior: ${args.length > 0 ? `${args.join(', ')}` : ''}`;
 
             // Si estamos en el server de logs, no ejecutar comandos (solo mostrar logs)
-            if (interaction.guildId === logsGuild) {
+            if (interaction.guildId === logsGuild && !allowInLogsGuild) {
                 // Registrar el intento de uso en el canal de logs y responder que está deshabilitado
                 await interaction.reply({ content: '⚠️ En este servidor los comandos están deshabilitados. Este servidor solo recibe logs.', ephemeral: true });
                 await interaction.client.log('Comando (bloqueado)', `/${interaction.commandName}`, logDescription, { id: interaction.user.id, tag: interaction.user.tag });
