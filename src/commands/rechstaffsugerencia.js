@@ -12,6 +12,7 @@ module.exports = {
         .addStringOption(opt => opt.setName('razon').setDescription('Razón del rechazo').setRequired(true))
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
     allowedGuilds: staffGuildId ? [staffGuildId] : [],
+    allowInLogsGuild: true,
 
     async execute(interaction) {
         if (!staffGuildId || interaction.guildId !== staffGuildId) {

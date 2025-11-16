@@ -17,6 +17,7 @@ module.exports = {
         )
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
     allowedGuilds: staffGuildId ? [staffGuildId] : [],
+    allowInLogsGuild: true,
 
     async execute(interaction) {
         if (!staffGuildId || interaction.guildId !== staffGuildId) {
