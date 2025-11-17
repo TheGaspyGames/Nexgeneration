@@ -12,7 +12,27 @@ module.exports = {
 
             if (!isAllowedCommand) {
                 if (interaction.isRepliable()) {
-                    const message = '⚠️ El bot se encuentra en modo debug automático. Los comandos y botones están temporalmente deshabilitados. Solo `/update` está disponible para administradores.';
+                    const { debugState } = interaction.client;
+                    const reason = debugState?.reason;
+                    const errorMessage = debugState?.errorMessage;
+                    const trimmedError = errorMessage && errorMessage.length > 500
+                        ? `${errorMessage.slice(0, 497)}…`
+                        : errorMessage;
+
+                    const details = [];
+                    if (reason) {
+                        details.push(`Motivo: ${reason}`);
+                    }
+                    if (trimmedError) {
+                        details.push(`Error: ${trimmedError}`);
+                    }
+
+                    const message = [
+                        '⚠️ El bot se encuentra en modo debug automático.',
+                        'Los comandos y botones están temporalmente deshabilitados.',
+                        'Solo `/update` está disponible para administradores.',
+                        details.length ? details.join('\n') : null,
+                    ].filter(Boolean).join('\n');
                     if (interaction.deferred || interaction.replied) {
                         await interaction.followUp({ content: message, ephemeral: true }).catch(() => null);
                     } else {
