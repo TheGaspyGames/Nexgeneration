@@ -636,7 +636,8 @@ client.on('shardError', (error, shardId) => {
 });
 
 // Cargar comandos (ahora en ./src/commands)
-const commandData = [];
+const defaultCommandData = [];
+const guildCommandData = new Map();
 const commandsPath = path.join(__dirname, 'src', 'commands');
 const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
 
@@ -645,7 +646,21 @@ for (const file of commandFiles) {
     const command = require(filePath);
     if ('data' in command && 'execute' in command) {
         const jsonData = command.data.toJSON();
-        commandData.push(jsonData);
+        const allowedGuilds = Array.isArray(command.allowedGuilds)
+            ? command.allowedGuilds.map(guildId => guildId && guildId.toString()).filter(Boolean)
+            : [];
+
+        if (allowedGuilds.length === 0) {
+            defaultCommandData.push({ name: jsonData.name, json: jsonData });
+        } else {
+            for (const guildId of allowedGuilds) {
+                if (!guildCommandData.has(guildId)) {
+                    guildCommandData.set(guildId, []);
+                }
+                guildCommandData.get(guildId).push({ name: jsonData.name, json: jsonData });
+            }
+        }
+
         client.commands.set(command.data.name, command);
     }
 }
@@ -656,15 +671,22 @@ const BOT_TOKEN = process.env.TOKEN || process.env.DISCORD_TOKEN || process.env.
 // Función para registrar comandos
 async function deployCommands() {
     try {
-        const body = client.debugMode
-            ? commandData.filter(cmd => client.debugAllowedCommands.has(cmd.name))
-            : commandData;
-        const countText = client.debugMode
-            ? `${body.length} (modo debug activo)`
-            : `${commandData.length}`;
-        console.log(`Iniciando el registro de ${countText} comandos.`);
+        const filterCommands = (commands) => {
+            if (!client.debugMode) return commands;
+            const allowed = client.debugAllowedCommands || new Set();
+            return commands.filter(cmd => allowed.has(cmd.name));
+        };
 
-        if (client.debugMode && body.length === 0) {
+        const mainCommands = filterCommands(defaultCommandData);
+        const scopedCommandEntries = [...guildCommandData.entries()].map(([guild, cmds]) => [guild, filterCommands(cmds)]);
+        const totalScoped = scopedCommandEntries.reduce((acc, [, cmds]) => acc + cmds.length, 0);
+        const totalToRegister = mainCommands.length + totalScoped;
+        const countText = client.debugMode
+            ? `${totalToRegister} (modo debug activo)`
+            : `${totalToRegister}`;
+        console.log(`Iniciando el registro de ${countText} comandos distribuidos por servidor.`);
+
+        if (client.debugMode && totalToRegister === 0) {
             console.warn('Modo debug activo pero no se encontraron comandos permitidos.');
         }
 
@@ -678,20 +700,26 @@ async function deployCommands() {
             return;
         }
 
-        let data;
+        const registerPayload = async (targetGuildId, commands) => {
+            if (!commands.length) return null;
+            const route = targetGuildId
+                ? Routes.applicationGuildCommands(appId, targetGuildId)
+                : Routes.applicationCommands(appId);
+            const data = await rest.put(route, { body: commands.map(cmd => cmd.json) });
+            const scopeText = targetGuildId ? `en el servidor ${targetGuildId}` : 'globalmente';
+            console.log(`Comandos ${client.debugMode ? 'deshabilitados' : 'registrados'} ${scopeText} (${data.length}).`);
+            return data;
+        };
+
         if (guildId) {
-            data = await rest.put(
-                Routes.applicationGuildCommands(appId, guildId),
-                { body },
-            );
-            console.log(`Comandos ${client.debugMode ? 'deshabilitados' : 'registrados'} exitosamente en el servidor ${guildId} (${data.length}).`);
+            await registerPayload(guildId, mainCommands);
         } else {
-            // Registrar globalmente si no hay guild configurado
-            data = await rest.put(
-                Routes.applicationCommands(appId),
-                { body },
-            );
-            console.log(`Comandos ${client.debugMode ? 'deshabilitados globalmente' : 'registrados globalmente'} (${data.length}).`);
+            await registerPayload(null, mainCommands);
+        }
+
+        for (const [targetGuildId, commands] of scopedCommandEntries) {
+            if (!commands.length) continue;
+            await registerPayload(targetGuildId, commands);
         }
 
         if (client.debugMode) {

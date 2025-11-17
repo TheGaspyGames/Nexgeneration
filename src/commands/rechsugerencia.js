@@ -19,7 +19,13 @@ module.exports = {
 
         let sugg;
         try {
-            sugg = await Suggestion.findOne({ id: id }).exec();
+            sugg = await Suggestion.findOne({
+                id,
+                $or: [
+                    { scope: { $exists: false } },
+                    { scope: 'public' }
+                ]
+            }).exec();
         } catch (error) {
             console.error('Error consultando sugerencia en MongoDB:', error);
             return interaction.reply({ content: '❌ No se pudo consultar la base de datos de sugerencias. Inténtalo nuevamente más tarde.', ephemeral: true });
