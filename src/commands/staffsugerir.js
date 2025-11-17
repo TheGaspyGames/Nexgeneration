@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const config = require('../../config/config.js');
 const { Suggestion, getNextSequence, isMongoConnected } = require('../models/Suggestion');
 const { rememberTabletSuggestion } = require('../utils/tabletSuggestions');
@@ -12,7 +12,7 @@ module.exports = {
         .addStringOption(option =>
             option.setName('sugerencia')
                 .setDescription('Tu sugerencia para el staff')
-                .setRequired(true))
+                .setRequired(true)),
     allowedGuilds: staffGuildId ? [staffGuildId] : [],
     allowInLogsGuild: true,
 
