@@ -13,7 +13,6 @@ module.exports = {
             option.setName('sugerencia')
                 .setDescription('Tu sugerencia para el staff')
                 .setRequired(true))
-        .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
     allowedGuilds: staffGuildId ? [staffGuildId] : [],
     allowInLogsGuild: true,
 
