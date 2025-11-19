@@ -8,6 +8,9 @@ const { TimedCache, BackgroundQueue } = require('./src/utils/performance');
 const CHANNEL_CACHE_TTL_MS = 10 * 60 * 1000;
 const GUILD_CACHE_TTL_MS = 15 * 60 * 1000;
 const INVITE_CACHE_TTL_MS = 30 * 1000;
+const INTERNET_CHECK_URL = 'https://www.google.com/generate_204';
+const INTERNET_CHECK_INTERVAL_MS = 30 * 1000;
+const INTERNET_CHECK_TIMEOUT_MS = 8 * 1000;
 
 const normalizeId = (value) => (value ? value.toString() : null);
 
@@ -162,6 +165,7 @@ client.getInviteUses = async function (guildLike, userId, options = {}) {
 };
 
 client.userCountStats = { nonBot: 0, lastSync: 0 };
+client.internetMonitor = { offlineSince: null, lastError: null, interval: null };
 
 client.updatePresenceCount = async function (options = {}) {
     if (!client.user) return 0;
@@ -592,6 +596,100 @@ client.flushStartupLogs = async function () {
     }
 };
 
+const formatDuration = (ms) => {
+    const totalSeconds = Math.max(1, Math.round(ms / 1000));
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    const parts = [];
+
+    if (hours) parts.push(`${hours}h`);
+    if (minutes) parts.push(`${minutes}m`);
+    if (seconds || parts.length === 0) parts.push(`${seconds}s`);
+
+    return parts.join(' ');
+};
+
+const checkInternetConnectivity = async () => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), INTERNET_CHECK_TIMEOUT_MS);
+
+    try {
+        const response = await fetch(INTERNET_CHECK_URL, { method: 'GET', signal: controller.signal });
+        const statusText = response && typeof response.status === 'number'
+            ? `status ${response.status}`
+            : 'respuesta desconocida';
+        const online = Boolean(response);
+        return { online, detail: statusText };
+    } catch (error) {
+        return { online: false, detail: error?.message || 'Error desconocido' };
+    } finally {
+        clearTimeout(timeoutId);
+    }
+};
+
+const ensureMongoConnectionHealthy = async () => {
+    if (!mongoUri) return;
+    if (mongoose.connection.readyState !== 1) {
+        await connectToMongo({ force: true });
+    }
+};
+
+const startInternetMonitor = () => {
+    const runCheck = async () => {
+        const { online, detail } = await checkInternetConnectivity();
+
+        if (!online) {
+            if (!client.internetMonitor.offlineSince) {
+                client.internetMonitor.offlineSince = Date.now();
+                console.warn(`[INTERNET] Conexi��n perdida: ${detail}`);
+            }
+            client.internetMonitor.lastError = detail || client.internetMonitor.lastError;
+            return;
+        }
+
+        const wasOfflineAt = client.internetMonitor.offlineSince;
+        const lastError = client.internetMonitor.lastError;
+        client.internetMonitor.lastError = null;
+
+        if (!wasOfflineAt) {
+            return;
+        }
+
+        const downtimeMs = Date.now() - wasOfflineAt;
+        const durationText = formatDuration(downtimeMs);
+        const detailText = lastError ? ` Ultimo error: ${lastError}` : '';
+        const description = `Canal: Logs\nInterior: La conexi��n a internet se restableci�� tras ${durationText}.${detailText ? ` ${detailText}` : ''}`;
+
+        try {
+            await client.log('Internet', 'Conexi��n restablecida', description, null);
+        } catch (err) {
+            console.error('Error enviando log de reconexi��n de internet:', err.message || err);
+        }
+
+        client.internetMonitor.offlineSince = null;
+        client.internetMonitor.lastError = null;
+
+        try {
+            await ensureMongoConnectionHealthy();
+        } catch (mongoErr) {
+            console.error('Error intentando reconectar MongoDB tras recuperar internet:', mongoErr.message || mongoErr);
+        }
+    };
+
+    client.runInBackground(runCheck);
+
+    const interval = setInterval(() => {
+        client.runInBackground(runCheck);
+    }, INTERNET_CHECK_INTERVAL_MS);
+
+    if (interval.unref) {
+        interval.unref();
+    }
+
+    client.internetMonitor.interval = interval;
+};
+
 if (mongoUri) {
     connectToMongo();
 
@@ -663,6 +761,8 @@ client.on('shardError', (error, shardId) => {
     console.error(`Error en el shard ${shardId}:`, error);
     client.enterDebugMode(`Error en shard ${shardId}`, error);
 });
+
+startInternetMonitor();
 
 // Cargar comandos (ahora en ./src/commands)
 const defaultCommandData = [];
