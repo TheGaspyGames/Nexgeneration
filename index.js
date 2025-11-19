@@ -224,34 +224,50 @@ const mongoose = require('mongoose');
 const mongoUri = process.env.MONGODB_URI || process.env.MONGO_URI || null;
 
 let mongoReconnectTimeout = null;
+let mongoReconnectAttempt = 0;
 
-const scheduleMongoReconnect = () => {
+const scheduleMongoReconnect = (reason = 'desconocido') => {
     if (mongoReconnectTimeout || !mongoUri) return;
+
+    const delay = Math.min(60000, 5000 * Math.max(1, mongoReconnectAttempt));
+    console.warn(`Programando reintento de conexión a MongoDB en ${Math.round(delay / 1000)}s (motivo: ${reason}).`);
+
     mongoReconnectTimeout = setTimeout(() => {
         mongoReconnectTimeout = null;
-        connectToMongo();
-    }, 5000);
+        connectToMongo({ force: true });
+    }, delay);
 };
 
-const connectToMongo = async () => {
+const connectToMongo = async ({ force = false } = {}) => {
     if (!mongoUri) return;
 
-    if (mongoose.connection.readyState === 1 || mongoose.connection.readyState === 2) {
+    if (!force && (mongoose.connection.readyState === 1 || mongoose.connection.readyState === 2)) {
         // Ya conectado o conectando
         return;
     }
 
     try {
+        if (force && mongoose.connection.readyState !== 0) {
+            try {
+                await mongoose.disconnect();
+            } catch (disconnectErr) {
+                console.error('Error al cerrar la conexión de MongoDB antes de reconectar:', disconnectErr.message || disconnectErr);
+            }
+        }
+
         await mongoose.connect(mongoUri, {
-            useNewUrlParser: true,
-            useUnifiedTopology: true
+            serverSelectionTimeoutMS: 5000,
+            socketTimeoutMS: 45000,
+            maxPoolSize: 10,
         });
+        mongoReconnectAttempt = 0;
         console.log('MongoDB conectado');
         await client.queueStartupLog('MongoDB', 'Conexión establecida', 'MongoDB conectado correctamente.');
     } catch (err) {
+        mongoReconnectAttempt++;
         console.error('MongoDB connection error:', err.message);
         await client.queueStartupLog('MongoDB', 'Error de conexión', `No se pudo conectar: ${err.message}`);
-        scheduleMongoReconnect();
+        scheduleMongoReconnect('fallo en conexión inicial');
     }
 };
 
@@ -582,14 +598,27 @@ if (mongoUri) {
     mongoose.connection.on('error', async err => {
         console.error('MongoDB connection error:', err.message || err);
         await client.queueStartupLog('MongoDB', 'Error detectado', `Se perdió la conexión: ${err.message || err}`);
-        scheduleMongoReconnect();
+        scheduleMongoReconnect('evento error');
     });
 
     mongoose.connection.on('disconnected', async () => {
         const warning = 'MongoDB desconectado. Intentando reconectar automáticamente...';
         console.warn(warning);
         await client.queueStartupLog('MongoDB', 'Desconectado', warning);
-        scheduleMongoReconnect();
+        scheduleMongoReconnect('evento disconnected');
+    });
+
+    mongoose.connection.on('connected', () => {
+        mongoReconnectAttempt = 0;
+        if (mongoReconnectTimeout) {
+            clearTimeout(mongoReconnectTimeout);
+            mongoReconnectTimeout = null;
+        }
+    });
+
+    mongoose.connection.on('reconnected', () => {
+        mongoReconnectAttempt = 0;
+        console.log('MongoDB reconectado');
     });
 } else {
     const notice = 'MONGODB_URI no configurado, usando almacenamiento en archivos si está implementado.';
