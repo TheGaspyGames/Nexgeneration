@@ -11,6 +11,10 @@ const INVITE_CACHE_TTL_MS = 30 * 1000;
 const INTERNET_CHECK_URL = 'https://www.google.com/generate_204';
 const INTERNET_CHECK_INTERVAL_MS = 30 * 1000;
 const INTERNET_CHECK_TIMEOUT_MS = 8 * 1000;
+const UPTIME_HEARTBEAT_INTERVAL_MS = 2 * 60 * 1000;
+const UPTIME_HEARTBEAT_TIMEOUT_MS = 10 * 1000;
+
+const uptimeUrl = process.env.UPTIME || process.env.Uptime || process.env.uptime || null;
 
 const normalizeId = (value) => (value ? value.toString() : null);
 
@@ -166,6 +170,7 @@ client.getInviteUses = async function (guildLike, userId, options = {}) {
 
 client.userCountStats = { nonBot: 0, lastSync: 0 };
 client.internetMonitor = { offlineSince: null, lastError: null, interval: null };
+client.uptimeHeartbeat = { interval: null };
 
 client.updatePresenceCount = async function (options = {}) {
     if (!client.user) return 0;
@@ -690,6 +695,53 @@ const startInternetMonitor = () => {
     client.internetMonitor.interval = interval;
 };
 
+const startUptimeHeartbeat = () => {
+    if (!uptimeUrl) {
+        console.log('[UPTIME] Variable UPTIME no definida; se omite heartbeat.');
+        return;
+    }
+
+    if (client.uptimeHeartbeat.interval) {
+        return;
+    }
+
+    if (typeof fetch !== 'function') {
+        console.warn('[UPTIME] fetch no disponible; se omite heartbeat.');
+        return;
+    }
+
+    const sendHeartbeat = async () => {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), UPTIME_HEARTBEAT_TIMEOUT_MS);
+
+        try {
+            const response = await fetch(uptimeUrl, { method: 'GET', signal: controller.signal });
+            const status = typeof response?.status === 'number' ? response.status : 0;
+
+            if (status >= 400) {
+                console.warn(`[UPTIME] Heartbeat devolvio status ${status}`);
+            }
+        } catch (error) {
+            console.error('[UPTIME] Error enviando heartbeat:', error?.message || error);
+        } finally {
+            clearTimeout(timeoutId);
+        }
+    };
+
+    client.runInBackground(sendHeartbeat);
+
+    const interval = setInterval(() => {
+        client.runInBackground(sendHeartbeat);
+    }, UPTIME_HEARTBEAT_INTERVAL_MS);
+
+    if (interval.unref) {
+        interval.unref();
+    }
+
+    client.uptimeHeartbeat.interval = interval;
+    console.log('[UPTIME] Heartbeat activo cada 2 minutos.');
+};
+
 if (mongoUri) {
     connectToMongo();
 
@@ -763,6 +815,7 @@ client.on('shardError', (error, shardId) => {
 });
 
 startInternetMonitor();
+startUptimeHeartbeat();
 
 // Cargar comandos (ahora en ./src/commands)
 const defaultCommandData = [];
