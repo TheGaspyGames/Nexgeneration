@@ -11,8 +11,9 @@ module.exports = {
         channelId: '1435121677649449120' // canal donde van los logs
     },
     minecraftServer: {
-        host: process.env.MINECRAFT_SERVER_HOST || null,
-        port: Number(process.env.MINECRAFT_SERVER_PORT) || 25565,
+        host: 'nexgneration.sdlf.fun', // IP pública Java
+        port: 49376,
+        bedrockHosts: ['nexgneration.sdlf.fun', 'ns570401.seedloaf.com'],
         statusTimeoutMs: 4000,
     },
     autoModeration: {

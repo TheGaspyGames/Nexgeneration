@@ -92,7 +92,7 @@ module.exports = {
         const boostCount = guild.premiumSubscriptionCount || 0;
 
         const { minecraftServer = {} } = config;
-        const { host, port, statusTimeoutMs = 4000 } = minecraftServer;
+        const { host, port, bedrockHosts = [], statusTimeoutMs = 4000 } = minecraftServer;
 
         await interaction.deferReply();
 
@@ -102,6 +102,11 @@ module.exports = {
             : mcStatus
                 ? '🟢 Servidor encendido'
                 : '🔴 Servidor apagado';
+
+        const javaAddress = host && port ? `${host}:${port}` : 'No configurado';
+        const bedrockAddressList = bedrockHosts.length > 0
+            ? bedrockHosts.map(domain => `${domain}:${port}`).join('\n')
+            : 'No configurado';
 
         const embed = new EmbedBuilder()
             .setTitle('Información del servidor')
@@ -133,6 +138,11 @@ module.exports = {
                     name: 'Boosts',
                     value: `${formatBoostLevel(guild.premiumTier)}\nImpulsos: **${boostCount}**`,
                     inline: true,
+                },
+                {
+                    name: 'Direcciones de Minecraft',
+                    value: `Java: **${javaAddress}**\nBedrock: **${bedrockAddressList}**`,
+                    inline: false,
                 },
                 {
                     name: 'Estado del servidor de Minecraft',
