@@ -10,6 +10,11 @@ module.exports = {
         guildId: '1433154337227542792', // servidor donde van los logs
         channelId: '1435121677649449120' // canal donde van los logs
     },
+    minecraftServer: {
+        host: process.env.MINECRAFT_SERVER_HOST || null,
+        port: Number(process.env.MINECRAFT_SERVER_PORT) || 25565,
+        statusTimeoutMs: 4000,
+    },
     autoModeration: {
         enabled: true,
         maxMentions: 5, // Número máximo de menciones permitidas
