@@ -1,4 +1,4 @@
-const { SlashCommandBuilder } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -9,11 +9,13 @@ module.exports = {
                 .setName('texto')
                 .setDescription('El mensaje que dirá el bot')
                 .setRequired(true)
-        ),
+        )
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
     async execute(interaction) {
         const message = interaction.options.getString('texto', true);
-        await interaction.reply({ content: '✅ Mensaje enviado.', ephemeral: true });
-        await interaction.followUp({ content: message });
+        await interaction.deferReply({ ephemeral: true });
+        await interaction.channel.send({ content: message });
+        await interaction.deleteReply();
     },
 };
