@@ -13,6 +13,7 @@ module.exports = {
 
     async execute(interaction) {
         const message = interaction.options.getString('texto', true);
-        await interaction.reply({ content: message });
+        await interaction.reply({ content: '✅ Mensaje enviado.', ephemeral: true });
+        await interaction.followUp({ content: message });
     },
 };
