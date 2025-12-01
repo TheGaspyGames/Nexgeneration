@@ -10,10 +10,10 @@ import discord
 from discord.ext import commands
 from dotenv import load_dotenv
 
-from .config import DEBUG_STATE_FILE, resolve_config
-from .features.giveaways import GiveawayManager
-from .utils.performance import BackgroundQueue, TimedCache
-from .utils.debug_state import DebugStateManager, DebugState
+from pybot.config import DEBUG_STATE_FILE, resolve_config
+from pybot.features.giveaways import GiveawayManager
+from pybot.utils.performance import BackgroundQueue, TimedCache
+from pybot.utils.debug_state import DebugStateManager, DebugState
 
 logging.basicConfig(level=logging.INFO)
 load_dotenv()
