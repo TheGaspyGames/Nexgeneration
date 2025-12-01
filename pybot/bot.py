@@ -3,12 +3,17 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import sys
 import time
+from pathlib import Path
 from typing import Iterable, Optional
 
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
+
+if __package__ in (None, ""):
+    sys.path.append(str(Path(__file__).resolve().parent.parent))
 
 from pybot.config import DEBUG_STATE_FILE, resolve_config
 from pybot.features.giveaways import GiveawayManager
