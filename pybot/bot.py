@@ -15,10 +15,9 @@ from dotenv import load_dotenv
 if __package__ in (None, ""):
     sys.path.append(str(Path(__file__).resolve().parent.parent))
 
-from pybot.config import DEBUG_STATE_FILE, resolve_config
+from pybot.config import resolve_config
 from pybot.features.giveaways import GiveawayManager
 from pybot.utils.performance import BackgroundQueue, TimedCache
-from pybot.utils.debug_state import DebugStateManager, DebugState
 
 logging.basicConfig(level=logging.INFO)
 load_dotenv()
@@ -44,11 +43,6 @@ class NexGenerationBot(commands.Bot):
         self.background_queue = BackgroundQueue()
 
         self.giveaway_manager = GiveawayManager(self)
-        self.debug_allowed_commands = {"update"}
-        self.debug_manager = DebugStateManager(DEBUG_STATE_FILE)
-        self.debug_state = self.debug_manager.load()
-        self.debug_mode = self.debug_state.active
-        self.pending_debug_notification = self.debug_mode
         self.startup_logs: list[tuple[str, str, str, Optional[dict]]] = []
         self.user_count_stats = {"non_bot": 0, "last_sync": 0}
         self.auto_mod_review_actions: dict[str, dict] = {}
@@ -230,66 +224,6 @@ class NexGenerationBot(commands.Bot):
             await channel.send(embed=embed)
         except Exception:
             logging.exception("No se pudo enviar el log")
-
-    # ---- Debug helpers ----
-    def build_debug_description(self) -> str:
-        if not self.debug_state:
-            return "Canal: Logs\nInterior: Activado automáticamente en modo debug."
-
-        details = []
-        if self.debug_state.reason:
-            details.append(f"Motivo: {self.debug_state.reason}")
-        if self.debug_state.error_message:
-            details.append(f"Detalle: {self.debug_state.error_message[:1800]}")
-        if not details:
-            details.append("Detalle: No disponible")
-        return "Canal: Logs\nInterior: Activado automáticamente en modo debug.\n" + "\n".join(details)
-
-    async def notify_debug_mode(self) -> None:
-        if not self.debug_mode or not self.pending_debug_notification:
-            return
-        try:
-            await self.log("Modo debug activado", "Bot en modo debug", self.build_debug_description(), None)
-            self.pending_debug_notification = False
-        except Exception:
-            logging.exception("No se pudo enviar la notificación de modo debug")
-
-    def enter_debug_mode(self, reason: str, error: Exception | str | None = None) -> None:
-        if self.debug_mode:
-            return
-        error_message: str | None
-        if isinstance(error, Exception):
-            error_message = str(error)
-        else:
-            error_message = error
-
-        self.debug_mode = True
-        self.debug_state = DebugState(
-            active=True,
-            reason=reason or "Error no especificado",
-            error_message=error_message,
-            activated_at=discord.utils.utcnow().isoformat(),
-            triggered_during_startup=not self.is_ready(),
-        )
-        self.pending_debug_notification = True
-        self.debug_manager.save(self.debug_state)
-
-    async def exit_debug_mode(self, *, reason: str | None = None, skip_log: bool = False) -> None:
-        if not self.debug_mode:
-            self.debug_manager.save(DebugState(active=False))
-            return
-
-        self.debug_mode = False
-        self.pending_debug_notification = False
-        self.debug_state = DebugState(active=False, cleared_at=discord.utils.utcnow().isoformat(), cleared_reason=reason)
-        self.debug_manager.save(self.debug_state)
-
-        if not skip_log:
-            description = f"Canal: Logs\nInterior: {reason or 'Modo debug desactivado automáticamente tras reinicio.'}"
-            try:
-                await self.log("Modo debug desactivado", "Bot operativo", description, None)
-            except Exception:
-                logging.exception("No se pudo enviar el log de desactivación de modo debug")
 
 
 async def main() -> None:

@@ -24,7 +24,6 @@ class ReadyEvents(commands.Cog):
             "Estado", "Bot conectado", f"¡Bot listo! Conectado como {self.bot.user}"
         )
         await self.bot.update_presence_count(force=True)
-        await self.bot.notify_debug_mode()
 
     @tasks.loop(minutes=PRESENCE_RESYNC_INTERVAL_MINUTES)
     async def presence_resync(self) -> None:

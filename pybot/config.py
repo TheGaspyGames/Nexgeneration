@@ -8,7 +8,6 @@ CONFIG_DIR = ROOT_DIR / "pybot_config"
 LEGACY_CONFIG_DIR = ROOT_DIR / "config"
 SETTINGS_FILE = CONFIG_DIR / "settings.json"
 LEGACY_SETTINGS_FILE = LEGACY_CONFIG_DIR / "settings.json"
-DEBUG_STATE_FILE = CONFIG_DIR / "debug-state.json"
 
 DEFAULT_CONFIG: Dict[str, Any] = {
     "embedColor": "#FF5733",
