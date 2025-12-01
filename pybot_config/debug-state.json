@@ -1,0 +1,9 @@
+{
+  "active": false,
+  "reason": null,
+  "errorMessage": null,
+  "activatedAt": null,
+  "triggeredDuringStartup": false,
+  "clearedAt": null,
+  "clearedReason": null
+}
