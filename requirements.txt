@@ -1,5 +1,0 @@
-discord.py==2.3.2
-python-dotenv==1.0.1
-motor==3.4.0
-# Motor 3.x depends on pymongo 4.x; pin it to avoid ImportError with pymongo 5+
-pymongo>=4.6,<5
