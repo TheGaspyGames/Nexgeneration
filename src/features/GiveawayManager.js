@@ -14,6 +14,82 @@ class GiveawayManager {
         this.startExpirationWatcher();
     }
 
+    getGiveawayById(giveawayId) {
+        if (!giveawayId) return null;
+        return this.giveaways.get(giveawayId) || null;
+    }
+
+    getMostRecentGiveaway(options = {}) {
+        const giveaways = Array.from(this.giveaways.values());
+        if (!giveaways.length) return null;
+
+        const { endedOnly = false, activeOnly = false } = options;
+        const filtered = giveaways.filter(giveaway => {
+            if (endedOnly) return giveaway.ended;
+            if (activeOnly) return !giveaway.ended;
+            return true;
+        });
+
+        if (!filtered.length) return null;
+
+        return filtered.sort((a, b) => (b.endTime || 0) - (a.endTime || 0))[0];
+    }
+
+    buildRequirementsList(giveaway) {
+        const requirements = [];
+        if (giveaway.minMessages && giveaway.minMessages > 0) requirements.push(`Mensajes minimos: ${giveaway.minMessages}`);
+        if (giveaway.requiredRole) requirements.push(`Rol requerido: <@&${giveaway.requiredRole}>`);
+        if (giveaway.excludedRole) requirements.push(`Rol bloqueado: <@&${giveaway.excludedRole}>`);
+        if (!requirements.length) requirements.push('Ninguno');
+        return requirements;
+    }
+
+    formatWinnerMentions(winners) {
+        return (winners && winners.length)
+            ? winners.map(id => `<@${id}>`).join(', ')
+            : 'Nadie participo';
+    }
+
+    buildEndedEmbed(giveaway, winners, options = {}) {
+        const winnerMentions = this.formatWinnerMentions(winners);
+        const endRequirements = this.buildRequirementsList(giveaway);
+        const rerollRequestedBy = options.reroll && options.requestedBy
+            ? `\nReroll solicitado por: <@${options.requestedBy}>`
+            : '';
+
+        const embed = new EmbedBuilder()
+            .setTitle(options.reroll ? 'ÐYZ% SORTEO RERROLLEADO' : 'ÐYZ% SORTEO TERMINADO')
+            .setDescription(`**Premio:** ${giveaway.prize}\n**Ganadores:** ${winnerMentions}\n**Host:** <@${giveaway.host}>${rerollRequestedBy}`)
+            .setColor('#FF5733')
+            .setFooter({ text: options.footerText || (options.reroll ? 'Sorteo rerrolleado' : 'Sorteo finalizado') })
+            .addFields({ name: 'Requisitos', value: endRequirements.join('\n') });
+
+        if (giveaway.requiredInvites && giveaway.requiredInvites > 0) {
+            embed.addFields({ name: 'Invites requeridos', value: `${giveaway.requiredInvites} invite(s)`, inline: false });
+        }
+
+        return embed;
+    }
+
+    pickUniqueWinners(participants, amount) {
+        const pool = Array.from(participants);
+        const winners = [];
+
+        for (let i = 0; i < amount && pool.length > 0; i++) {
+            const winnerIndex = Math.floor(Math.random() * pool.length);
+            winners.push(pool[winnerIndex]);
+            pool.splice(winnerIndex, 1);
+        }
+
+        return winners;
+    }
+
+    buildError(code, message) {
+        const error = new Error(message);
+        error.code = code;
+        return error;
+    }
+
     startExpirationWatcher() {
         if (this.expirationWatcher) return;
 
@@ -129,6 +205,7 @@ class GiveawayManager {
             requiredRole,
             excludedRole,
             requiredInvites,
+            lastWinners: [],
             participants: new Set(),
             ended: false,
             messageCache: giveawayMessage
@@ -148,32 +225,10 @@ class GiveawayManager {
         const channel = message?.channel ?? await this.client.resolveChannel(giveaway.channelId);
         if (!channel) return;
 
-        const participants = Array.from(giveaway.participants);
-        const winners = [];
+        const winners = this.pickUniqueWinners(giveaway.participants, giveaway.winners);
+        giveaway.lastWinners = winners;
 
-        for (let i = 0; i < giveaway.winners && participants.length > 0; i++) {
-            const winnerIndex = Math.floor(Math.random() * participants.length);
-            winners.push(participants[winnerIndex]);
-            participants.splice(winnerIndex, 1);
-        }
-
-        const winnerMentions = winners.map(id => `<@${id}>`).join(', ') || 'Nadie participó';
-
-        const endRequirements = [];
-        if (giveaway.minMessages && giveaway.minMessages > 0) endRequirements.push(`Mensajes mínimos: ${giveaway.minMessages}`);
-        if (giveaway.requiredRole) endRequirements.push(`Rol requerido: <@&${giveaway.requiredRole}>`);
-        if (giveaway.excludedRole) endRequirements.push(`Rol bloqueado: <@&${giveaway.excludedRole}>`);
-        if (!endRequirements.length) endRequirements.push('Ninguno');
-
-        const embed = new EmbedBuilder()
-            .setTitle('🎉 SORTEO TERMINADO')
-            .setDescription(`**Premio:** ${giveaway.prize}\n**Ganadores:** ${winnerMentions}\n**Host:** <@${giveaway.host}>`)
-            .setColor('#FF5733')
-            .setFooter({ text: 'Sorteo finalizado' })
-            .addFields({ name: 'Requisitos', value: endRequirements.join('\n') });
-            if (giveaway.requiredInvites && giveaway.requiredInvites > 0) {
-                embed.addFields({ name: 'Invites requeridos', value: `${giveaway.requiredInvites} invite(s)`, inline: false });
-            }
+        const embed = this.buildEndedEmbed(giveaway, winners, { footerText: 'Sorteo finalizado' });
 
         if (message) {
             await message.edit({
@@ -185,7 +240,7 @@ class GiveawayManager {
 
         if (winners.length > 0) {
             await channel.send({
-                content: `¡Felicitaciones ${winnerMentions}! Han ganado: **${giveaway.prize}**`,
+                content: `Felicitaciones ${this.formatWinnerMentions(winners)}! Han ganado: **${giveaway.prize}**`,
                 allowedMentions: { users: winners }
             });
         }
@@ -225,6 +280,118 @@ class GiveawayManager {
             giveaway.timeoutId.unref();
         }
         this.giveaways.set(messageId, giveaway);
+    }
+
+
+    async rerollGiveaway(options = {}) {
+        const giveawayId = options.giveawayId || null;
+        const requestedBy = options.requestedBy || null;
+        const winnersCount = options.winnersCount;
+        let giveaway = giveawayId
+            ? this.getGiveawayById(giveawayId)
+            : this.getMostRecentGiveaway({ endedOnly: true });
+
+        if (!giveaway && !giveawayId) {
+            giveaway = this.getMostRecentGiveaway({ activeOnly: true });
+        }
+
+        if (!giveaway) {
+            throw this.buildError('GIVEAWAY_NOT_FOUND', 'Sorteo no encontrado.');
+        }
+
+        if (!giveaway.ended) {
+            throw this.buildError('GIVEAWAY_NOT_ENDED', 'El sorteo aun no ha finalizado.');
+        }
+
+        const participants = Array.from(giveaway.participants || []);
+        if (!participants.length) {
+            throw this.buildError('NO_PARTICIPANTS', 'No hay participantes registrados en este sorteo.');
+        }
+
+        const totalToPick = Number.isInteger(winnersCount) && winnersCount > 0
+            ? winnersCount
+            : giveaway.winners;
+
+        if (!totalToPick || Number.isNaN(totalToPick) || totalToPick <= 0) {
+            throw this.buildError('INVALID_WINNER_COUNT', 'Cantidad de ganadores invalida.');
+        }
+
+        if (participants.length < totalToPick) {
+            throw this.buildError('INSUFFICIENT_PARTICIPANTS', 'No hay suficientes participantes para rerrollear.');
+        }
+
+        const winners = this.pickUniqueWinners(participants, totalToPick);
+        giveaway.lastWinners = winners;
+        this.giveaways.set(giveaway.messageId, giveaway);
+
+        const message = await this.getOrFetchGiveawayMessage(giveaway);
+        const channel = message?.channel ?? await this.client.resolveChannel(giveaway.channelId);
+        if (!channel) {
+            throw this.buildError('CHANNEL_UNAVAILABLE', 'No se pudo acceder al canal del sorteo.');
+        }
+
+        const embed = this.buildEndedEmbed(giveaway, winners, {
+            reroll: true,
+            requestedBy,
+            footerText: 'Sorteo rerrolleado'
+        });
+
+        if (message) {
+            await message.edit({ embeds: [embed], components: [] }).catch(() => null);
+            giveaway.messageCache = message;
+        }
+
+        const messageLink = `https://discord.com/channels/${giveaway.guildId}/${giveaway.channelId}/${giveaway.messageId}`;
+        const announceEmbed = new EmbedBuilder()
+            .setTitle('Reroll completado')
+            .setColor('#2ecc71')
+            .setDescription(`Premio: **${giveaway.prize}**`)
+            .addFields(
+                { name: 'Nuevos ganadores', value: this.formatWinnerMentions(winners), inline: false },
+                { name: 'Sorteo', value: `[Ver mensaje](${messageLink})`, inline: true },
+                { name: 'Solicitado por', value: requestedBy ? `<@${requestedBy}>` : 'Desconocido', inline: true }
+            )
+            .setTimestamp();
+
+        await channel.send({
+            embeds: [announceEmbed],
+            allowedMentions: { users: winners }
+        });
+
+        return { giveaway, winners, channel, message };
+    }
+
+    async expelParticipantFromGiveaway(options = {}) {
+        const giveawayId = options.giveawayId || null;
+        const userId = options.userId;
+        if (!userId) {
+            throw this.buildError('USER_REQUIRED', 'Debes indicar un usuario.');
+        }
+
+        const giveaway = giveawayId
+            ? this.getGiveawayById(giveawayId)
+            : this.getMostRecentGiveaway({ activeOnly: true });
+
+        if (!giveaway) {
+            throw this.buildError('GIVEAWAY_NOT_FOUND', 'Sorteo no encontrado.');
+        }
+
+        if (giveaway.ended) {
+            throw this.buildError('GIVEAWAY_ENDED', 'El sorteo ya finalizo.');
+        }
+
+        if (!giveaway.participants.has(userId)) {
+            throw this.buildError('USER_NOT_IN_GIVEAWAY', 'El usuario no esta participando en este sorteo.');
+        }
+
+        giveaway.participants.delete(userId);
+        this.giveaways.set(giveaway.messageId, giveaway);
+        await this.updateParticipantsField(null, giveaway);
+
+        const message = await this.getOrFetchGiveawayMessage(giveaway);
+        const channel = message?.channel ?? await this.client.resolveChannel(giveaway.channelId);
+
+        return { giveaway, message, channel };
     }
 
     async handleJoin(interaction) {
