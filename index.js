@@ -1,9 +1,10 @@
-const { Client, GatewayIntentBits, Partials, Collection, REST, Routes, ActivityType, EmbedBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, Partials, Collection, ActivityType, EmbedBuilder } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
 require('dotenv').config();
 const config = require('./config/config.js');
 const { TimedCache, BackgroundQueue } = require('./src/utils/performance');
+const { loadSlashCommands, registerSlashCommands } = require('./src/utils/commandRegistration');
 
 const CHANNEL_CACHE_TTL_MS = 10 * 60 * 1000;
 const GUILD_CACHE_TTL_MS = 15 * 60 * 1000;
@@ -817,92 +818,31 @@ client.on('shardError', (error, shardId) => {
 startInternetMonitor();
 startUptimeHeartbeat();
 
-// Cargar comandos (ahora en ./src/commands)
-const defaultCommandData = [];
-const guildCommandData = new Map();
-const commandsPath = path.join(__dirname, 'src', 'commands');
-const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
-
-for (const file of commandFiles) {
-    const filePath = path.join(commandsPath, file);
-    const command = require(filePath);
-    if ('data' in command && 'execute' in command) {
-        const jsonData = command.data.toJSON();
-        const allowedGuilds = Array.isArray(command.allowedGuilds)
-            ? command.allowedGuilds.map(guildId => guildId && guildId.toString()).filter(Boolean)
-            : [];
-
-        if (allowedGuilds.length === 0) {
-            defaultCommandData.push({ name: jsonData.name, json: jsonData });
-        } else {
-            for (const guildId of allowedGuilds) {
-                if (!guildCommandData.has(guildId)) {
-                    guildCommandData.set(guildId, []);
-                }
-                guildCommandData.get(guildId).push({ name: jsonData.name, json: jsonData });
-            }
-        }
-
-        client.commands.set(command.data.name, command);
-    }
-}
+// Cargar comandos (ahora centralizado en ./src/utils/commandRegistration)
+const commandsDirectory = path.join(__dirname, 'src', 'commands');
+const { commands: loadedCommands, guildCommands: scopedCommands, collection: loadedCollection } = loadSlashCommands(commandsDirectory);
+client.commands = loadedCollection;
 
 // Token del bot (acepta TOKEN o DISCORD_TOKEN en .env/entorno)
 const BOT_TOKEN = process.env.TOKEN || process.env.DISCORD_TOKEN || process.env.DISCORD;
+const APPLICATION_ID = process.env.CLIENT_ID || process.env.CLIENTID || process.env.APPLICATION_ID;
+const REGISTER_GLOBALLY = process.env.SKIP_GLOBAL_COMMANDS !== 'true';
 
-// Función para registrar comandos
+// Función para registrar comandos (disponible para el bot y para el script manual)
 async function deployCommands() {
     try {
-        const filterCommands = (commands) => {
-            if (!client.debugMode) return commands;
-            const allowed = client.debugAllowedCommands || new Set();
-            return commands.filter(cmd => allowed.has(cmd.name));
-        };
+        const guildId = process.env.GUILD_ID || (client.settings && client.settings.guildId);
 
-        const mainCommands = filterCommands(defaultCommandData);
-        const scopedCommandEntries = [...guildCommandData.entries()].map(([guild, cmds]) => [guild, filterCommands(cmds)]);
-        const totalScoped = scopedCommandEntries.reduce((acc, [, cmds]) => acc + cmds.length, 0);
-        const totalToRegister = mainCommands.length + totalScoped;
-        const countText = client.debugMode
-            ? `${totalToRegister} (modo debug activo)`
-            : `${totalToRegister}`;
-        console.log(`Iniciando el registro de ${countText} comandos distribuidos por servidor.`);
-
-        if (client.debugMode && totalToRegister === 0) {
-            console.warn('Modo debug activo pero no se encontraron comandos permitidos.');
-        }
-
-        const rest = new REST().setToken(BOT_TOKEN);
-        // Determinar applicationId y guildId (priorizar env, luego settings, luego client)
-        const appId = process.env.CLIENT_ID || process.env.CLIENTID || (client.user && client.user.id);
-        const guildId = process.env.GUILD_ID || client.settings && client.settings.guildId;
-
-        if (!appId) {
-            console.warn('No se pudo determinar el application ID para registrar comandos. Se omitirá el registro.');
-            return;
-        }
-
-        const registerPayload = async (targetGuildId, commands) => {
-            if (!commands.length) return null;
-            const route = targetGuildId
-                ? Routes.applicationGuildCommands(appId, targetGuildId)
-                : Routes.applicationCommands(appId);
-            const data = await rest.put(route, { body: commands.map(cmd => cmd.json) });
-            const scopeText = targetGuildId ? `en el servidor ${targetGuildId}` : 'globalmente';
-            console.log(`Comandos ${client.debugMode ? 'deshabilitados' : 'registrados'} ${scopeText} (${data.length}).`);
-            return data;
-        };
-
-        if (guildId) {
-            await registerPayload(guildId, mainCommands);
-        } else {
-            await registerPayload(null, mainCommands);
-        }
-
-        for (const [targetGuildId, commands] of scopedCommandEntries) {
-            if (!commands.length) continue;
-            await registerPayload(targetGuildId, commands);
-        }
+        await registerSlashCommands({
+            token: BOT_TOKEN,
+            clientId: APPLICATION_ID || (client.user && client.user.id),
+            commands: loadedCommands,
+            guildCommands: scopedCommands,
+            guildId,
+            registerGlobally: REGISTER_GLOBALLY,
+            debugMode: client.debugMode,
+            allowedCommands: client.debugAllowedCommands,
+        });
 
         if (client.debugMode) {
             await notifyDebugMode();
