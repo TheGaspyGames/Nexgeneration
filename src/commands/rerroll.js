@@ -10,14 +10,14 @@ const buildEmbed = (title, description, color = '#FF5733') => {
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('rerroll')
-        .setDescription('Vuelve a seleccionar ganadores para un sorteo finalizado')
+        .setDescription('Rerrollear ganadores de un sorteo')
         .addStringOption(option =>
             option.setName('sorteo_id')
                 .setDescription('ID del sorteo (mensaje) a rerrollear')
                 .setRequired(false))
         .addIntegerOption(option =>
             option.setName('cantidad')
-                .setDescription('Numero de ganadores a rerrollear (por defecto todos)')
+                .setDescription('Cantidad de ganadores a rerrollear (por defecto todos)')
                 .setMinValue(1)
                 .setRequired(false))
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),

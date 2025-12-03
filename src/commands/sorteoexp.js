@@ -10,7 +10,7 @@ const buildEmbed = (title, description, color = '#FF5733') => {
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('sorteoexp')
-        .setDescription('Expulsa un usuario del sorteo antes de que finalice')
+        .setDescription('Expulsar a un usuario de un sorteo')
         .addStringOption(option =>
             option.setName('sorteo_id')
                 .setDescription('ID del sorteo (mensaje). Si no se envia, se usa el sorteo activo mas reciente.')
