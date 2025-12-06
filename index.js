@@ -827,21 +827,24 @@ client.commands = loadedCollection;
 const BOT_TOKEN = process.env.TOKEN || process.env.DISCORD_TOKEN || process.env.DISCORD;
 const APPLICATION_ID = process.env.CLIENT_ID || process.env.CLIENTID || process.env.APPLICATION_ID;
 const REGISTER_GLOBALLY = process.env.SKIP_GLOBAL_COMMANDS !== 'true';
+const DEPLOY_GUILD_COMMANDS = process.env.DEPLOY_GUILD_COMMANDS === 'true';
 
 // Función para registrar comandos (disponible para el bot y para el script manual)
 async function deployCommands() {
     try {
         const guildId = process.env.GUILD_ID || (client.settings && client.settings.guildId);
+        const shouldUseGuild = Boolean(guildId) && (DEPLOY_GUILD_COMMANDS || !REGISTER_GLOBALLY);
 
         await registerSlashCommands({
             token: BOT_TOKEN,
             clientId: APPLICATION_ID || (client.user && client.user.id),
             commands: loadedCommands,
             guildCommands: scopedCommands,
-            guildId,
+            guildId: shouldUseGuild ? guildId : null,
             registerGlobally: REGISTER_GLOBALLY,
             debugMode: client.debugMode,
             allowedCommands: client.debugAllowedCommands,
+            cleanupGuilds: !shouldUseGuild && guildId ? [guildId] : [],
         });
 
         if (client.debugMode) {

@@ -15,12 +15,13 @@ const APPLICATION_ID = process.env.CLIENT_ID || process.env.CLIENTID || process.
 const settingsGuildId = settings.guildId ? settings.guildId.toString() : null;
 const envGuildId = process.env.GUILD_ID || process.env.GUILDID;
 const guildId = envGuildId ? envGuildId.toString() : settingsGuildId;
+const enableGuildDeploy = process.env.DEPLOY_GUILD_COMMANDS === 'true';
 
 const args = process.argv.slice(2);
 const guildOnly = args.includes('--guild-only') || args.includes('--guild');
 const globalOnly = args.includes('--global-only') || args.includes('--global');
 const registerGlobally = !guildOnly && !args.includes('--skip-global');
-const shouldUseGuild = Boolean(guildId) && !globalOnly;
+const shouldUseGuild = Boolean(guildId) && !globalOnly && (guildOnly || !registerGlobally || enableGuildDeploy);
 
 (async () => {
     try {
@@ -34,6 +35,7 @@ const shouldUseGuild = Boolean(guildId) && !globalOnly;
             guildCommands,
             guildId: shouldUseGuild ? guildId : null,
             registerGlobally,
+            cleanupGuilds: !shouldUseGuild && guildId ? [guildId] : [],
         });
 
         console.log('[deploy] Despliegue completado. Los comandos de guild aparecen al instante; los globales pueden tardar unos minutos.');
