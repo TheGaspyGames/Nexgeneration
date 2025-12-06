@@ -2,6 +2,33 @@ const fs = require('fs');
 const path = require('path');
 const { Collection, REST, Routes } = require('discord.js');
 
+async function cleanupOrphanCommands(rest, clientId, allowedNames, targetGuildId = null) {
+    if (!allowedNames || allowedNames.size === 0) return 0;
+
+    const listRoute = targetGuildId
+        ? Routes.applicationGuildCommands(clientId, targetGuildId)
+        : Routes.applicationCommands(clientId);
+    const deleteRoute = (commandId) => targetGuildId
+        ? Routes.applicationGuildCommand(clientId, targetGuildId, commandId)
+        : Routes.applicationCommand(clientId, commandId);
+
+    const existing = await rest.get(listRoute);
+    const toDelete = existing.filter(cmd => !allowedNames.has(cmd.name));
+    if (!toDelete.length) return 0;
+
+    for (const cmd of toDelete) {
+        try {
+            await rest.delete(deleteRoute(cmd.id));
+            const scopeText = targetGuildId ? `guild ${targetGuildId}` : 'global';
+            console.log(`[deploy] Eliminado comando huérfano "${cmd.name}" (${cmd.id}) en ${scopeText}.`);
+        } catch (err) {
+            console.warn(`[deploy] No se pudo eliminar el comando "${cmd.name}" (${cmd.id}): ${err.message}`);
+        }
+    }
+
+    return toDelete.length;
+}
+
 /**
  * Carga todos los comandos de barra desde un directorio.
  * Devuelve la colección para el cliente y los payloads listos para registrar.
@@ -64,6 +91,7 @@ async function registerSlashCommands({
     registerGlobally = true,
     debugMode = false,
     allowedCommands = new Set(),
+    cleanupOrphaned = true,
 }) {
     if (!token) throw new Error('No se recibió el token del bot');
     if (!clientId) throw new Error('No se recibió el client/application ID');
@@ -109,6 +137,30 @@ async function registerSlashCommands({
     for (const [targetGuildId, cmds] of scopedEntries) {
         if (!cmds.length) continue;
         await registerPayload(targetGuildId, cmds);
+    }
+
+    if (cleanupOrphaned) {
+        const allowedGlobalNames = new Set(mainCommands.map(cmd => cmd.name));
+        const guildAllowedMap = new Map();
+
+        if (guildId) {
+            guildAllowedMap.set(guildId, new Set(mainCommands.map(cmd => cmd.name)));
+        }
+
+        for (const [targetGuildId, cmds] of scopedEntries) {
+            guildAllowedMap.set(targetGuildId, new Set(cmds.map(cmd => cmd.name)));
+        }
+
+        if (allowedGlobalNames.size > 0) {
+            await cleanupOrphanCommands(rest, clientId, allowedGlobalNames, null);
+        } else {
+            console.warn('[deploy] Limpieza global omitida: no hay comandos permitidos para el ámbito global.');
+        }
+
+        for (const [targetGuildId, names] of guildAllowedMap.entries()) {
+            if (names.size === 0) continue;
+            await cleanupOrphanCommands(rest, clientId, names, targetGuildId);
+        }
     }
 }
 
