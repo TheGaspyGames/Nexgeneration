@@ -11,14 +11,14 @@ module.exports = {
     data: new SlashCommandBuilder()
         .setName('sorteoexp')
         .setDescription('Expulsar a un usuario de un sorteo')
-        .addStringOption(option =>
-            option.setName('sorteo_id')
-                .setDescription('ID del sorteo (mensaje). Si no se envia, se usa el sorteo activo mas reciente.')
-                .setRequired(false))
         .addUserOption(option =>
             option.setName('usuario')
                 .setDescription('Usuario a expulsar del sorteo')
                 .setRequired(true))
+        .addStringOption(option =>
+            option.setName('sorteo_id')
+                .setDescription('ID del sorteo (mensaje). Si no se envia, se usa el sorteo activo mas reciente.')
+                .setRequired(false))
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
 
     async execute(interaction) {
