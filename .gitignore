@@ -1,2 +1,4 @@
 node_modules/
 config/debug-state.json
+config/settings.json
+.env
