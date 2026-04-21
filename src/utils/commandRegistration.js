@@ -1,6 +1,24 @@
+'use strict';
+
 const fs = require('fs');
 const path = require('path');
 const { Collection, REST, Routes } = require('discord.js');
+
+/**
+ * Recorre un directorio de forma recursiva y devuelve todos los archivos .js encontrados.
+ */
+function getCommandFiles(dir) {
+    const results = [];
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+            results.push(...getCommandFiles(fullPath));
+        } else if (entry.isFile() && entry.name.endsWith('.js')) {
+            results.push(fullPath);
+        }
+    }
+    return results;
+}
 
 async function cleanupOrphanCommands(rest, clientId, allowedNames, targetGuildId = null, deleteAllWhenEmpty = false) {
     if (!allowedNames || allowedNames.size === 0) {
@@ -16,7 +34,7 @@ async function cleanupOrphanCommands(rest, clientId, allowedNames, targetGuildId
 
     const existing = await rest.get(listRoute);
     const toDelete = allowedNames.size === 0
-        ? existing // delete everything in that scope
+        ? existing
         : existing.filter(cmd => !allowedNames.has(cmd.name));
     if (!toDelete.length) return 0;
 
@@ -34,40 +52,51 @@ async function cleanupOrphanCommands(rest, clientId, allowedNames, targetGuildId
 }
 
 /**
- * Carga todos los comandos de barra desde un directorio.
+ * Carga todos los comandos de barra desde un directorio (y subdirectorios).
  * Devuelve la coleccion para el cliente y los payloads listos para registrar.
+ *
+ * Reglas de alcance (por prioridad):
+ *   1. command.allowedGuilds = ['guildId']  → solo ese servidor
+ *   2. command.globalCommand = false         → NO se registra globalmente (solo guild principal)
+ *   3. Sin ninguna propiedad                 → global
  */
 function loadSlashCommands(commandsDirectory) {
-    const commands = [];
-    const guildCommands = new Map();
+    const commands = [];       // comandos globales
+    const guildCommands = new Map(); // comandos por guild específico
     const collection = new Collection();
 
-    // Cualquier archivo nuevo en src/commands se cargara automaticamente.
-    const commandFiles = fs.readdirSync(commandsDirectory).filter(file => file.endsWith('.js'));
+    const commandFiles = getCommandFiles(commandsDirectory);
 
-    for (const file of commandFiles) {
-        const filePath = path.join(commandsDirectory, file);
-        const command = require(filePath);
+    for (const filePath of commandFiles) {
+        let command;
+        try {
+            command = require(filePath);
+        } catch (err) {
+            console.warn(`[deploy] Error cargando ${filePath}: ${err.message}`);
+            continue;
+        }
 
         if (!command || !command.data || !command.execute) {
-            console.warn(`[deploy] El archivo ${file} no exporta { data, execute }.`);
+            console.warn(`[deploy] El archivo ${path.basename(filePath)} no exporta { data, execute }.`);
             continue;
         }
 
         const jsonData = command.data.toJSON();
+
+        // allowedGuilds: array de IDs de guilds donde el comando es exclusivo
         const allowedGuilds = Array.isArray(command.allowedGuilds)
-            ? command.allowedGuilds.map(guildId => guildId && guildId.toString()).filter(Boolean)
+            ? command.allowedGuilds.map(id => id && id.toString()).filter(Boolean)
             : [];
 
-        if (allowedGuilds.length === 0) {
-            commands.push(jsonData);
-        } else {
+        if (allowedGuilds.length > 0) {
+            // Comando exclusivo de uno o más servidores específicos
             for (const guildId of allowedGuilds) {
-                if (!guildCommands.has(guildId)) {
-                    guildCommands.set(guildId, []);
-                }
+                if (!guildCommands.has(guildId)) guildCommands.set(guildId, []);
                 guildCommands.get(guildId).push(jsonData);
             }
+        } else {
+            // Comando global
+            commands.push(jsonData);
         }
 
         collection.set(jsonData.name, command);
@@ -82,10 +111,6 @@ function filterCommandsForDebug(commands, debugMode, allowedCommands) {
     return commands.filter(cmd => allowed.has(cmd.name));
 }
 
-/**
- * Registra comandos de barra globales y por servidor.
- * Usa REST v14 y soporta despliegue rapido en un servidor especifico ademas de global.
- */
 async function registerSlashCommands({
     token,
     clientId,
@@ -124,21 +149,13 @@ async function registerSlashCommands({
             : Routes.applicationCommands(clientId);
         const data = await rest.put(route, { body: payload });
         const scopeText = targetGuildId ? `en el servidor ${targetGuildId}` : 'globalmente';
-        console.log(`[deploy] Comandos ${debugMode ? 'deshabilitados' : 'registrados'} ${scopeText} (${data.length}).`);
+        console.log(`[deploy] Comandos ${debugMode ? 'filtrados (debug)' : 'registrados'} ${scopeText} (${data.length}).`);
         return data;
     };
 
-    // Registro rapido en un guild para pruebas (si se indica).
-    if (guildId) {
-        await registerPayload(guildId, mainCommands);
-    }
+    if (guildId) await registerPayload(guildId, mainCommands);
+    if (registerGlobally) await registerPayload(null, mainCommands);
 
-    // Registro global (puede tardar en propagarse, pero es el destino final).
-    if (registerGlobally) {
-        await registerPayload(null, mainCommands);
-    }
-
-    // Registro de comandos especificos por guild declarados en los archivos.
     for (const [targetGuildId, cmds] of scopedEntries) {
         if (!cmds.length) continue;
         await registerPayload(targetGuildId, cmds);
@@ -149,9 +166,7 @@ async function registerSlashCommands({
         const guildAllowedMap = new Map();
         const guildDeleteAll = new Set();
 
-        if (guildId) {
-            guildAllowedMap.set(guildId, new Set(mainCommands.map(cmd => cmd.name)));
-        }
+        if (guildId) guildAllowedMap.set(guildId, new Set(mainCommands.map(cmd => cmd.name)));
 
         for (const [targetGuildId, cmds] of scopedEntries) {
             guildAllowedMap.set(targetGuildId, new Set(cmds.map(cmd => cmd.name)));
@@ -169,7 +184,7 @@ async function registerSlashCommands({
         if (allowedGlobalNames.size > 0) {
             await cleanupOrphanCommands(rest, clientId, allowedGlobalNames, null);
         } else {
-            console.warn('[deploy] Limpieza global omitida: no hay comandos permitidos para el ambito global.');
+            console.warn('[deploy] Limpieza global omitida: no hay comandos globales definidos.');
         }
 
         for (const [targetGuildId, names] of guildAllowedMap.entries()) {
@@ -179,7 +194,4 @@ async function registerSlashCommands({
     }
 }
 
-module.exports = {
-    loadSlashCommands,
-    registerSlashCommands,
-};
+module.exports = { loadSlashCommands, registerSlashCommands };
