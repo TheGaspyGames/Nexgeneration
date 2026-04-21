@@ -1,9 +1,15 @@
+'use strict';
+
 const DEFAULT_TTL_MS = 60 * 1000;
+const AUTO_PRUNE_INTERVAL_MS = 5 * 60 * 1000;
 
 class TimedCache {
     constructor(defaultTtl = DEFAULT_TTL_MS) {
         this.defaultTtl = defaultTtl;
         this.store = new Map();
+
+        this._pruneInterval = setInterval(() => this.prune(), AUTO_PRUNE_INTERVAL_MS);
+        if (this._pruneInterval.unref) this._pruneInterval.unref();
     }
 
     _now() {
@@ -48,6 +54,16 @@ class TimedCache {
                 this.store.delete(key);
             }
         }
+    }
+
+    /** Detiene el pruning automático y limpia el store. Llamar al cerrar el bot. */
+    destroy() {
+        clearInterval(this._pruneInterval);
+        this.store.clear();
+    }
+
+    get size() {
+        return this.store.size;
     }
 }
 
